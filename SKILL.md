@@ -42,6 +42,13 @@ python3 scripts/skills_audit.py audit-discovery \
 python3 scripts/skills_audit.py audit-discovery \
   --profile-file config/discovery-profile.cursor-jz.example.json
 
+# Summary-only + CI gating
+python3 scripts/skills_audit.py audit-discovery \
+  --profile-file config/discovery-profile.cursor-jz.example.json \
+  --summary-only \
+  --fail-on-conflict \
+  --fail-on-hash-conflict
+
 # Apply sync
 python3 scripts/skills_audit.py sync \
   --skills-dir "$HOME/.cursor/skills" \
@@ -56,3 +63,4 @@ python3 scripts/skills_audit.py sync \
 - For non-symlink existing entries, archive to timestamped backup before relinking.
 - If target has no `SKILL.md`, skip and report as error.
 - For discovery collisions, prefer profile-based source priority and keep same-hash folding enabled.
+- Use `--summary-only` and fail flags for periodic CI-style health checks.

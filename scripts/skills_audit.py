@@ -58,6 +58,16 @@ class DiscoveryChoice:
     hash_conflict: bool
 
 
+@dataclass
+class DiscoverySummary:
+    total_skills: int
+    raw_candidates: int
+    effective_candidates: int
+    duplicate_skills: int
+    hash_conflict_skills: int
+    collapsed_identical_candidates: int
+
+
 def scan_skills(skills_dir: Path) -> List[EntryStatus]:
     items: List[EntryStatus] = []
     if not skills_dir.exists():
@@ -293,6 +303,17 @@ def build_discovery(
     return choices, canonical_items
 
 
+def summarize_discovery(choices: List[DiscoveryChoice]) -> DiscoverySummary:
+    return DiscoverySummary(
+        total_skills=len(choices),
+        raw_candidates=sum(c.total_candidates for c in choices),
+        effective_candidates=sum(c.effective_candidates for c in choices),
+        duplicate_skills=sum(1 for c in choices if c.effective_candidates > 1),
+        hash_conflict_skills=sum(1 for c in choices if c.hash_conflict),
+        collapsed_identical_candidates=sum(len(c.collapsed_identical_roots) for c in choices),
+    )
+
+
 def plan_sync(skills_dir: Path, mapping: Dict[str, str]) -> List[SyncAction]:
     actions: List[SyncAction] = []
     for name, target_str in mapping.items():
@@ -421,7 +442,24 @@ def print_discovery_report(
     items: List[DiscoveryItem],
     choices: List[DiscoveryChoice],
     canonical_items: List[DiscoveryItem],
+    summary: DiscoverySummary,
+    summary_only: bool,
 ) -> None:
+    if summary_only:
+        print("discovery summary:")
+        print(
+            "total_skills\traw_candidates\teffective_candidates\tduplicate_skills\t"
+            "hash_conflict_skills\tcollapsed_identical_candidates"
+        )
+        print(
+            f"{summary.total_skills}\t{summary.raw_candidates}\t{summary.effective_candidates}\t"
+            f"{summary.duplicate_skills}\t{summary.hash_conflict_skills}\t"
+            f"{summary.collapsed_identical_candidates}"
+        )
+        print("\njson:")
+        print(json.dumps(asdict(summary), indent=2, ensure_ascii=False))
+        return
+
     print("sources (priority order):")
     for idx, src in enumerate(sources):
         print(f"{idx}\t{src.expanduser()}")
@@ -463,6 +501,7 @@ def print_discovery_report(
                 "candidates": [asdict(i) for i in items],
                 "choices": [asdict(c) for c in choices],
                 "canonical_preview": [asdict(c) for c in canonical_items],
+                "summary": asdict(summary),
             },
             indent=2,
             ensure_ascii=False,
@@ -506,6 +545,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-collapse-identical",
         action="store_true",
         help="Disable same-hash candidate folding in discovery report.",
+    )
+    p_discovery.add_argument(
+        "--summary-only",
+        action="store_true",
+        help="Print only summary counters and JSON summary.",
+    )
+    p_discovery.add_argument(
+        "--fail-on-conflict",
+        action="store_true",
+        help="Exit with code 2 if any duplicate skill remains after collapse.",
+    )
+    p_discovery.add_argument(
+        "--fail-on-hash-conflict",
+        action="store_true",
+        help="Exit with code 3 if any same-name skill has hash conflict.",
     )
 
     return parser
@@ -553,6 +607,7 @@ def main() -> int:
             all_items.extend(discover_from_source(src, idx, excluded_sources))
 
         choices, canonical_items = build_discovery(all_items, collapse_identical=collapse_identical)
+        summary = summarize_discovery(choices)
         print_discovery_report(
             sources,
             excluded_sources,
@@ -560,7 +615,15 @@ def main() -> int:
             all_items,
             choices,
             canonical_items,
+            summary,
+            args.summary_only,
         )
+        if args.fail_on_conflict and summary.duplicate_skills > 0:
+            print("\nFAIL: duplicate skills remain after collapse.")
+            return 2
+        if args.fail_on_hash_conflict and summary.hash_conflict_skills > 0:
+            print("\nFAIL: hash conflicts detected.")
+            return 3
         return 0
 
     parser.print_help()

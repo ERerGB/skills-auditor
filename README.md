@@ -116,6 +116,17 @@ python3 scripts/skills_audit.py audit-discovery \
 python3 scripts/skills_audit.py audit-discovery \
   --profile-file config/discovery-profile.cursor-jz.example.json
 
+# CI-friendly summary
+python3 scripts/skills_audit.py audit-discovery \
+  --profile-file config/discovery-profile.cursor-jz.example.json \
+  --summary-only
+
+# Fail when unresolved conflicts remain
+python3 scripts/skills_audit.py audit-discovery \
+  --profile-file config/discovery-profile.cursor-jz.example.json \
+  --fail-on-conflict \
+  --fail-on-hash-conflict
+
 # exclude noisy paths and keep same-hash folding on
 python3 scripts/skills_audit.py audit-discovery \
   --source "$HOME/.cursor/plugins" \
@@ -128,6 +139,12 @@ Discovery report includes:
 - `effective_candidates`: after same-hash folding
 - `collapsed_identical`: number of folded duplicates
 - `hash_conflict`: same-name but different content hash (high risk)
+
+CI flags:
+
+- `--summary-only`: print compact counters only
+- `--fail-on-conflict`: non-zero exit if duplicates remain
+- `--fail-on-hash-conflict`: non-zero exit if same-name hash conflicts exist
 
 ## Recommended Profile
 
