@@ -21,6 +21,8 @@ This repo provides a safe workflow:
 - Audit `~/.cursor/skills` (or custom skill root)
 - Detect symlink health (`ok` / `broken`)
 - Detect folder mode (`symlink` / `directory` / `file`)
+- Audit discovery-layer collisions across multiple sources
+- Build canonical injection preview with source priority
 - Sync selected skills to canonical sources via mapping file
 - Safe replacement: existing directories are archived before relinking
 - Default dry-run behavior
@@ -39,7 +41,13 @@ python3 scripts/skills_audit.py sync \
   --skills-dir "$HOME/.cursor/skills" \
   --map-file config/sources.example.json
 
-# 3) Apply sync
+# 3) Discovery-layer audit (multi-source, dedupe preview)
+python3 scripts/skills_audit.py audit-discovery \
+  --source "$HOME/.cursor/skills" \
+  --source "$HOME/.cursor/skills-cursor" \
+  --source "/Users/j.z/code/fulmail/.cursor/skills"
+
+# 4) Apply sync
 python3 scripts/skills_audit.py sync \
   --skills-dir "$HOME/.cursor/skills" \
   --map-file config/sources.example.json \
@@ -84,6 +92,50 @@ python3 scripts/skills_audit.py sync \
 ```
 
 Use `--apply` to execute changes.
+
+### `audit-discovery`
+
+Inspect discovery-layer behavior across multiple skill sources and output:
+
+- all discovered candidates
+- same-name collision groups
+- canonical selection by source priority
+- final injection preview
+
+```bash
+# default sources: ./.cursor/skills, ~/.cursor/skills, ~/.cursor/skills-cursor
+python3 scripts/skills_audit.py audit-discovery
+
+# explicit priority (first source wins conflicts)
+python3 scripts/skills_audit.py audit-discovery \
+  --source "$HOME/.cursor/skills" \
+  --source "$HOME/.cursor/skills-cursor" \
+  --source "/Users/j.z/code/fulmail/.cursor/skills"
+
+# profile-driven discovery (recommended)
+python3 scripts/skills_audit.py audit-discovery \
+  --profile-file config/discovery-profile.cursor-jz.example.json
+
+# exclude noisy paths and keep same-hash folding on
+python3 scripts/skills_audit.py audit-discovery \
+  --source "$HOME/.cursor/plugins" \
+  --exclude-source "$HOME/.cursor/plugins/cache"
+```
+
+Discovery report includes:
+
+- `total_candidates`: all same-name hits
+- `effective_candidates`: after same-hash folding
+- `collapsed_identical`: number of folded duplicates
+- `hash_conflict`: same-name but different content hash (high risk)
+
+## Recommended Profile
+
+See `config/discovery-profile.cursor-jz.example.json`:
+
+- Includes user, built-in, project, and plugin roots
+- Excludes plugin cache to reduce duplicate noise
+- Keeps `collapse_identical=true` for stable canonical preview
 
 ## Safety Notes
 

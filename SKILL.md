@@ -14,11 +14,12 @@ description: Audit and synchronize local skill directories by detecting broken l
 
 ## Workflow
 
-1. Run audit first.
-2. If user wants canonical sync, prepare a JSON mapping file.
-3. Run sync in dry-run mode and review planned actions.
-4. Run sync with `--apply` only after approval.
-5. Re-run audit to verify final state.
+1. Run filesystem audit first (`audit`).
+2. Run discovery-layer audit (`audit-discovery`) to detect collisions.
+3. If user wants canonical sync, prepare a JSON mapping file.
+4. Run sync in dry-run mode and review planned actions.
+5. Run sync with `--apply` only after approval.
+6. Re-run `audit` + `audit-discovery` to verify final state.
 
 ## Commands
 
@@ -31,6 +32,15 @@ python3 scripts/skills_audit.py audit \
 python3 scripts/skills_audit.py sync \
   --skills-dir "$HOME/.cursor/skills" \
   --map-file config/sources.example.json
+
+# Discovery-layer audit
+python3 scripts/skills_audit.py audit-discovery \
+  --source "$HOME/.cursor/skills" \
+  --source "$HOME/.cursor/skills-cursor"
+
+# Discovery profile (recommended)
+python3 scripts/skills_audit.py audit-discovery \
+  --profile-file config/discovery-profile.cursor-jz.example.json
 
 # Apply sync
 python3 scripts/skills_audit.py sync \
@@ -45,3 +55,4 @@ python3 scripts/skills_audit.py sync \
 - Never apply without user confirmation.
 - For non-symlink existing entries, archive to timestamped backup before relinking.
 - If target has no `SKILL.md`, skip and report as error.
+- For discovery collisions, prefer profile-based source priority and keep same-hash folding enabled.

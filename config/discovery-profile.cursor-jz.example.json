@@ -1,0 +1,12 @@
+{
+  "sources": [
+    "~/.cursor/skills",
+    "~/.cursor/skills-cursor",
+    "/Users/j.z/code/fulmail/.cursor/skills",
+    "~/.cursor/plugins"
+  ],
+  "exclude_sources": [
+    "~/.cursor/plugins/cache"
+  ],
+  "collapse_identical": true
+}
