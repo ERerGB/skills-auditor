@@ -7,7 +7,7 @@ description: Audit and synchronize local skill directories by detecting broken l
 
 ## When to Use
 
-- User asks to audit `~/.cursor/skills` or similar directories.
+- User asks to audit one or more local skill directories in their current environment.
 - User asks to detect broken skill links.
 - User asks to sync local skills to canonical repositories.
 - User wants one-click cleanup with dry-run safety.
@@ -24,34 +24,38 @@ description: Audit and synchronize local skill directories by detecting broken l
 ## Commands
 
 ```bash
+# Set these for your environment first
+PRIMARY_SKILLS_DIR="${PRIMARY_SKILLS_DIR:-/path/to/primary/skills}"
+SECONDARY_SKILLS_DIR="${SECONDARY_SKILLS_DIR:-/path/to/secondary/skills}"
+
 # Audit
 python3 scripts/skills_audit.py audit \
-  --skills-dir "$HOME/.cursor/skills"
+  --skills-dir "$PRIMARY_SKILLS_DIR"
 
 # Dry-run sync
 python3 scripts/skills_audit.py sync \
-  --skills-dir "$HOME/.cursor/skills" \
+  --skills-dir "$PRIMARY_SKILLS_DIR" \
   --map-file config/sources.example.json
 
 # Discovery-layer audit
 python3 scripts/skills_audit.py audit-discovery \
-  --source "$HOME/.cursor/skills" \
-  --source "$HOME/.cursor/skills-cursor"
+  --source "$PRIMARY_SKILLS_DIR" \
+  --source "$SECONDARY_SKILLS_DIR"
 
 # Discovery profile (recommended)
 python3 scripts/skills_audit.py audit-discovery \
-  --profile-file config/discovery-profile.cursor-jz.example.json
+  --profile-file config/discovery-profile.example.json
 
 # Summary-only + CI gating
 python3 scripts/skills_audit.py audit-discovery \
-  --profile-file config/discovery-profile.cursor-jz.example.json \
+  --profile-file config/discovery-profile.example.json \
   --summary-only \
   --fail-on-conflict \
   --fail-on-hash-conflict
 
 # Apply sync
 python3 scripts/skills_audit.py sync \
-  --skills-dir "$HOME/.cursor/skills" \
+  --skills-dir "$PRIMARY_SKILLS_DIR" \
   --map-file config/sources.example.json \
   --apply
 ```
