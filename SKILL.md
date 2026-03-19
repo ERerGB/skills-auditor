@@ -15,11 +15,12 @@ description: Audit and synchronize local skill directories by detecting broken l
 ## Workflow
 
 1. Run filesystem audit first (`audit`).
-2. Run discovery-layer audit (`audit-discovery`) to detect collisions.
-3. If user wants canonical sync, prepare a JSON mapping file.
-4. Run sync in dry-run mode and review planned actions.
-5. Run sync with `--apply` only after approval.
-6. Re-run `audit` + `audit-discovery` to verify final state.
+2. Run drift check (`drift-check`) to verify local-remote sync.
+3. Run discovery-layer audit (`audit-discovery`) to detect collisions.
+4. If user wants canonical sync, prepare a JSON mapping file.
+5. Run sync in dry-run mode and review planned actions.
+6. Run sync with `--apply` only after approval.
+7. Re-run `audit --with-drift` to verify final state.
 
 ## Commands
 
@@ -28,8 +29,17 @@ description: Audit and synchronize local skill directories by detecting broken l
 PRIMARY_SKILLS_DIR="${PRIMARY_SKILLS_DIR:-/path/to/primary/skills}"
 SECONDARY_SKILLS_DIR="${SECONDARY_SKILLS_DIR:-/path/to/secondary/skills}"
 
-# Audit
+# Audit (basic)
 python3 scripts/skills_audit.py audit \
+  --skills-dir "$PRIMARY_SKILLS_DIR"
+
+# Audit with drift (shows remote URL for synced skills, local path for drifted)
+python3 scripts/skills_audit.py audit \
+  --skills-dir "$PRIMARY_SKILLS_DIR" \
+  --with-drift
+
+# Drift check (standalone — git fetch + ahead/behind/dirty for each symlinked skill)
+python3 scripts/skills_audit.py drift-check \
   --skills-dir "$PRIMARY_SKILLS_DIR"
 
 # Dry-run sync
@@ -59,6 +69,14 @@ python3 scripts/skills_audit.py sync \
   --map-file config/sources.example.json \
   --apply
 ```
+
+## Drift Check Behavior
+
+- Only checks symlinked skills (directories without git context are skipped).
+- Runs `git fetch` for each skill's repo to get latest remote state.
+- Reports: `synced` (ahead=0, behind=0, dirty=0) or `DRIFT` with details.
+- **Display rule**: synced skills show the remote GitHub URL as their target; drifted skills show the local filesystem path. This makes the canonical source of truth immediately visible.
+- `audit --with-drift` merges drift data into the standard audit table.
 
 ## Safety Rules
 

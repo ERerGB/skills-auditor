@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -66,6 +67,82 @@ class DiscoverySummary:
     duplicate_skills: int
     hash_conflict_skills: int
     collapsed_identical_candidates: int
+
+
+@dataclass
+class DriftStatus:
+    name: str
+    local_path: str
+    remote_url: Optional[str]
+    branch: Optional[str]
+    ahead: int
+    behind: int
+    dirty_count: int
+    synced: bool
+    # When synced, display_target shows the remote URL; otherwise local path
+    display_target: str
+    error: Optional[str] = None
+
+
+def _git(args: List[str], cwd: Path) -> Optional[str]:
+    """Run a git command and return stripped stdout, or None on failure."""
+    try:
+        r = subprocess.run(
+            ["git"] + args,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return r.stdout.strip() if r.returncode == 0 else None
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+
+def check_drift_for_path(name: str, path: Path) -> DriftStatus:
+    """Check git sync status for a local skill path."""
+    resolved = path.resolve()
+    local_str = str(resolved)
+
+    # Walk up to find the git repo root (skill may be nested in a monorepo)
+    git_root = _git(["rev-parse", "--show-toplevel"], resolved)
+    if git_root is None:
+        return DriftStatus(
+            name=name, local_path=local_str, remote_url=None,
+            branch=None, ahead=0, behind=0, dirty_count=0,
+            synced=False, display_target=local_str,
+            error="not a git repository",
+        )
+
+    git_root_path = Path(git_root)
+
+    # Fetch latest remote state (quiet, non-blocking)
+    _git(["fetch", "--quiet"], git_root_path)
+
+    branch = _git(["branch", "--show-current"], git_root_path) or "HEAD"
+    remote_url = _git(["remote", "get-url", "origin"], git_root_path)
+
+    ahead_str = _git(["rev-list", "--count", f"origin/{branch}..HEAD"], git_root_path)
+    behind_str = _git(["rev-list", "--count", f"HEAD..origin/{branch}"], git_root_path)
+    ahead = int(ahead_str) if ahead_str and ahead_str.isdigit() else 0
+    behind = int(behind_str) if behind_str and behind_str.isdigit() else 0
+
+    dirty_out = _git(["status", "--porcelain"], git_root_path)
+    dirty_count = len(dirty_out.splitlines()) if dirty_out else 0
+
+    synced = ahead == 0 and behind == 0 and dirty_count == 0
+
+    # Build a human-friendly remote display: github URL without .git suffix
+    display = local_str
+    if synced and remote_url:
+        display = remote_url.removesuffix(".git")
+
+    return DriftStatus(
+        name=name, local_path=local_str, remote_url=remote_url,
+        branch=branch, ahead=ahead, behind=behind,
+        dirty_count=dirty_count, synced=synced,
+        display_target=display,
+    )
 
 
 def scan_skills(skills_dir: Path) -> List[EntryStatus]:
@@ -414,15 +491,53 @@ def apply_actions(skills_dir: Path, actions: List[SyncAction]) -> None:
             continue
 
 
-def print_audit(statuses: List[EntryStatus]) -> None:
-    print("name\tentry_type\tlink_status\thas_skill_md\tresolved_target")
+def print_audit(
+    statuses: List[EntryStatus],
+    drift_map: Optional[Dict[str, DriftStatus]] = None,
+) -> None:
+    has_drift = drift_map is not None
+    header = "name\tentry_type\tlink_status\thas_skill_md\tdisplay_target"
+    if has_drift:
+        header += "\tsync_status"
+    print(header)
+
     for item in statuses:
-        print(
+        drift = drift_map.get(item.name) if drift_map else None
+        # When drift data available and synced, show remote URL instead of local path
+        target = item.resolved_target or "-"
+        if drift and drift.synced and drift.remote_url:
+            target = drift.display_target
+
+        row = (
             f"{item.name}\t{item.entry_type}\t{item.link_status or '-'}\t"
-            f"{str(item.has_skill_md).lower()}\t{item.resolved_target or '-'}"
+            f"{str(item.has_skill_md).lower()}\t{target}"
         )
+        if has_drift:
+            if drift is None:
+                row += "\t-"
+            elif drift.error:
+                row += f"\t{drift.error}"
+            elif drift.synced:
+                row += "\tsynced"
+            else:
+                parts = []
+                if drift.ahead > 0:
+                    parts.append(f"ahead={drift.ahead}")
+                if drift.behind > 0:
+                    parts.append(f"behind={drift.behind}")
+                if drift.dirty_count > 0:
+                    parts.append(f"dirty={drift.dirty_count}")
+                row += f"\tdrift({', '.join(parts)})"
+        print(row)
+
+    json_data = [asdict(s) for s in statuses]
+    if drift_map:
+        for entry in json_data:
+            drift = drift_map.get(entry["name"])
+            if drift:
+                entry["drift"] = asdict(drift)
     print("\njson:")
-    print(json.dumps([asdict(s) for s in statuses], indent=2, ensure_ascii=False))
+    print(json.dumps(json_data, indent=2, ensure_ascii=False))
 
 
 def print_plan(actions: List[SyncAction], apply: bool) -> None:
@@ -509,12 +624,39 @@ def print_discovery_report(
     )
 
 
+def print_drift_report(drifts: List[DriftStatus]) -> None:
+    print("name\tsynced\tbranch\tahead\tbehind\tdirty\tdisplay_target")
+    for d in drifts:
+        sync_label = "synced" if d.synced else "DRIFT"
+        if d.error:
+            sync_label = d.error
+        print(
+            f"{d.name}\t{sync_label}\t{d.branch or '-'}\t"
+            f"{d.ahead}\t{d.behind}\t{d.dirty_count}\t{d.display_target}"
+        )
+
+    synced_count = sum(1 for d in drifts if d.synced)
+    drift_count = sum(1 for d in drifts if not d.synced and not d.error)
+    error_count = sum(1 for d in drifts if d.error)
+    print(f"\nsummary: {synced_count} synced, {drift_count} drifted, {error_count} errors")
+
+    print("\njson:")
+    print(json.dumps([asdict(d) for d in drifts], indent=2, ensure_ascii=False))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Audit and sync local skill folders.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_audit = sub.add_parser("audit", help="Audit current skills directory state")
     p_audit.add_argument("--skills-dir", default="~/.cursor/skills", help="Skill root directory")
+    p_audit.add_argument(
+        "--with-drift", action="store_true",
+        help="Include git drift check for symlinked skills (fetches remote).",
+    )
+
+    p_drift = sub.add_parser("drift-check", help="Check git sync status for symlinked skills")
+    p_drift.add_argument("--skills-dir", default="~/.cursor/skills", help="Skill root directory")
 
     p_sync = sub.add_parser("sync", help="Plan or apply skill relinking based on map file")
     p_sync.add_argument("--skills-dir", default="~/.cursor/skills", help="Skill root directory")
@@ -572,7 +714,23 @@ def main() -> int:
     if args.command == "audit":
         skills_dir = Path(args.skills_dir).expanduser()
         statuses = scan_skills(skills_dir)
-        print_audit(statuses)
+        drift_map: Optional[Dict[str, DriftStatus]] = None
+        if args.with_drift:
+            drift_map = {}
+            for s in statuses:
+                if s.entry_type == "symlink" and s.link_status == "ok" and s.resolved_target:
+                    drift_map[s.name] = check_drift_for_path(s.name, Path(s.resolved_target))
+        print_audit(statuses, drift_map)
+        return 0
+
+    if args.command == "drift-check":
+        skills_dir = Path(args.skills_dir).expanduser()
+        statuses = scan_skills(skills_dir)
+        drifts: List[DriftStatus] = []
+        for s in statuses:
+            if s.entry_type == "symlink" and s.link_status == "ok" and s.resolved_target:
+                drifts.append(check_drift_for_path(s.name, Path(s.resolved_target)))
+        print_drift_report(drifts)
         return 0
 
     if args.command == "sync":
