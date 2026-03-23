@@ -1,8 +1,12 @@
 {
+  "agents-governor": "/Users/j.z/code/subagent-harness/governance/agents-governor",
+  "arch-preview": "/Users/j.z/code/dev-doc-governance/skills/arch-preview",
   "arch-review": "/Users/j.z/code/dev-doc-governance/skills/arch-review",
   "auto-doc-index": "/Users/j.z/code/dev-doc-governance/skills/auto-doc-index",
   "discussion-logger": "/Users/j.z/code/dev-doc-governance/skills/discussion-logger",
   "hacker": "/Users/j.z/code/hacker",
+  "samantha": "/Users/j.z/code/subagent-harness/skills/samantha",
+  "skills-auditor": "/Users/j.z/code/skills-auditor",
   "uninstaller": "/Users/j.z/code/openclaw-uninstall",
-  "wander": "/Users/j.z/code/wander"
+  "wander": "/Users/j.z/code/wander/wander"
 }

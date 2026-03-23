@@ -18,7 +18,8 @@ This repo provides a safe workflow:
 
 ## Features
 
-- Audit `~/.cursor/skills` (or custom skill root)
+- Audit `~/.cursor/skills`, `~/.claude/skills`, or any custom skill root
+- Repeat `--skills-dir` to audit/sync **Cursor + Claude Code** in one run
 - Detect symlink health (`ok` / `broken`)
 - Detect folder mode (`symlink` / `directory` / `file`)
 - Audit discovery-layer collisions across multiple sources
@@ -27,28 +28,51 @@ This repo provides a safe workflow:
 - Safe replacement: existing directories are archived before relinking
 - Default dry-run behavior
 
+## Install
+
+From a clone of this repo, use a virtualenv (recommended on macOS / PEP 668):
+
+```bash
+cd /path/to/skills-auditor
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e .
+```
+
+This installs the **`skills-audit`** console script and enables **`python -m skills_auditor`**.
+
+**Global CLI (optional):** `pipx install /path/to/skills-auditor` (or `pipx install .` from the repo).
+
+**Without any install:** run **`python3 scripts/skills_audit.py`** from the repo root (it prepends the repo to `sys.path`).
+
 ## Quick Start
 
 ```bash
-cd /Users/j.z/code/skills-auditor
+cd /path/to/skills-auditor
 
 # 1) Audit current status
-python3 scripts/skills_audit.py audit \
+skills-audit audit \
   --skills-dir "$HOME/.cursor/skills"
 
 # 2) Plan sync (dry-run)
-python3 scripts/skills_audit.py sync \
+skills-audit sync \
   --skills-dir "$HOME/.cursor/skills" \
   --map-file config/sources.example.json
 
+# 2b) Same mapping, both Cursor + Claude Code global roots (dry-run)
+skills-audit sync \
+  --skills-dir "$HOME/.cursor/skills" \
+  --skills-dir "$HOME/.claude/skills" \
+  --map-file config/sources.example.json
+
 # 3) Discovery-layer audit (multi-source, dedupe preview)
-python3 scripts/skills_audit.py audit-discovery \
+skills-audit audit-discovery \
   --source "$HOME/.cursor/skills" \
   --source "$HOME/.cursor/skills-cursor" \
-  --source "/Users/j.z/code/fulmail/.cursor/skills"
+  --source "/path/to/your/project/.cursor/skills"
 
 # 4) Apply sync
-python3 scripts/skills_audit.py sync \
+skills-audit sync \
   --skills-dir "$HOME/.cursor/skills" \
   --map-file config/sources.example.json \
   --apply
@@ -78,7 +102,7 @@ Rules:
 Inspect the current skill root and print a table + JSON summary.
 
 ```bash
-python3 scripts/skills_audit.py audit --skills-dir "$HOME/.cursor/skills"
+skills-audit audit --skills-dir "$HOME/.cursor/skills"
 ```
 
 ### `sync`
@@ -86,7 +110,7 @@ python3 scripts/skills_audit.py audit --skills-dir "$HOME/.cursor/skills"
 Compare current state with expected sources, then propose/apply relinking.
 
 ```bash
-python3 scripts/skills_audit.py sync \
+skills-audit sync \
   --skills-dir "$HOME/.cursor/skills" \
   --map-file config/sources.example.json
 ```
@@ -103,32 +127,33 @@ Inspect discovery-layer behavior across multiple skill sources and output:
 - final injection preview
 
 ```bash
-# default sources: ./.cursor/skills, ~/.cursor/skills, ~/.cursor/skills-cursor
-python3 scripts/skills_audit.py audit-discovery
+# default sources: ./.cursor/skills, ~/.cursor/skills, ~/.cursor/skills-cursor,
+#   ./.claude/skills, ~/.claude/skills
+skills-audit audit-discovery
 
 # explicit priority (first source wins conflicts)
-python3 scripts/skills_audit.py audit-discovery \
+skills-audit audit-discovery \
   --source "$HOME/.cursor/skills" \
   --source "$HOME/.cursor/skills-cursor" \
-  --source "/Users/j.z/code/fulmail/.cursor/skills"
+  --source "/path/to/your/project/.cursor/skills"
 
 # profile-driven discovery (recommended)
-python3 scripts/skills_audit.py audit-discovery \
+skills-audit audit-discovery \
   --profile-file config/discovery-profile.cursor-jz.example.json
 
 # CI-friendly summary
-python3 scripts/skills_audit.py audit-discovery \
+skills-audit audit-discovery \
   --profile-file config/discovery-profile.cursor-jz.example.json \
   --summary-only
 
 # Fail when unresolved conflicts remain
-python3 scripts/skills_audit.py audit-discovery \
+skills-audit audit-discovery \
   --profile-file config/discovery-profile.cursor-jz.example.json \
   --fail-on-conflict \
   --fail-on-hash-conflict
 
 # exclude noisy paths and keep same-hash folding on
-python3 scripts/skills_audit.py audit-discovery \
+skills-audit audit-discovery \
   --source "$HOME/.cursor/plugins" \
   --exclude-source "$HOME/.cursor/plugins/cache"
 ```

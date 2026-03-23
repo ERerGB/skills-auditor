@@ -24,48 +24,68 @@ description: Audit and synchronize local skill directories by detecting broken l
 
 ## Commands
 
+Install once from the repo root: `pip install -e .` — then use the **`skills-audit`** CLI (or `python -m skills_auditor`). From an uninstalled clone you can still run `python3 scripts/skills_audit.py`.
+
 ```bash
 # Set these for your environment first
 PRIMARY_SKILLS_DIR="${PRIMARY_SKILLS_DIR:-/path/to/primary/skills}"
 SECONDARY_SKILLS_DIR="${SECONDARY_SKILLS_DIR:-/path/to/secondary/skills}"
 
 # Audit (basic)
-python3 scripts/skills_audit.py audit \
+skills-audit audit \
   --skills-dir "$PRIMARY_SKILLS_DIR"
 
+# Audit Cursor + Claude Code global skills roots (repeat --skills-dir)
+skills-audit audit \
+  --skills-dir "$HOME/.cursor/skills" \
+  --skills-dir "$HOME/.claude/skills"
+
 # Audit with drift (shows remote URL for synced skills, local path for drifted)
-python3 scripts/skills_audit.py audit \
+skills-audit audit \
   --skills-dir "$PRIMARY_SKILLS_DIR" \
   --with-drift
 
 # Drift check (standalone — git fetch + ahead/behind/dirty for each symlinked skill)
-python3 scripts/skills_audit.py drift-check \
+skills-audit drift-check \
   --skills-dir "$PRIMARY_SKILLS_DIR"
 
 # Dry-run sync
-python3 scripts/skills_audit.py sync \
+skills-audit sync \
   --skills-dir "$PRIMARY_SKILLS_DIR" \
   --map-file config/sources.example.json
 
+# Dry-run sync both Cursor and Claude Code (same mapping file)
+skills-audit sync \
+  --skills-dir "$HOME/.cursor/skills" \
+  --skills-dir "$HOME/.claude/skills" \
+  --map-file config/sources.example.json
+
 # Discovery-layer audit
-python3 scripts/skills_audit.py audit-discovery \
+skills-audit audit-discovery \
   --source "$PRIMARY_SKILLS_DIR" \
   --source "$SECONDARY_SKILLS_DIR"
 
 # Discovery profile (recommended)
-python3 scripts/skills_audit.py audit-discovery \
-  --profile-file config/discovery-profile.example.json
+skills-audit audit-discovery \
+  --profile-file config/discovery-profile.cursor-jz.example.json
 
 # Summary-only + CI gating
-python3 scripts/skills_audit.py audit-discovery \
-  --profile-file config/discovery-profile.example.json \
+skills-audit audit-discovery \
+  --profile-file config/discovery-profile.cursor-jz.example.json \
   --summary-only \
   --fail-on-conflict \
   --fail-on-hash-conflict
 
 # Apply sync
-python3 scripts/skills_audit.py sync \
+skills-audit sync \
   --skills-dir "$PRIMARY_SKILLS_DIR" \
+  --map-file config/sources.example.json \
+  --apply
+
+# Apply sync to both agent roots
+skills-audit sync \
+  --skills-dir "$HOME/.cursor/skills" \
+  --skills-dir "$HOME/.claude/skills" \
   --map-file config/sources.example.json \
   --apply
 ```

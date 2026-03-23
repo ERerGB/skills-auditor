@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "skills-auditor"
+version = "0.2.0"
+description = "Audit and synchronize local AI skill folders (Cursor, Claude Code, etc.)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+keywords = ["cursor", "claude", "skills", "agents", "symlink"]
+authors = [{ name = "skills-auditor contributors" }]
+
+[project.urls]
+Homepage = "https://github.com/ERerGB/skills-auditor"
+
+[project.scripts]
+skills-audit = "skills_auditor.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["skills_auditor"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/skills_auditor",
+  "/config",
+  "/scripts",
+  "/README.md",
+  "/SKILL.md",
+]
