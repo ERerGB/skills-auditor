@@ -99,14 +99,11 @@ If you use a [gstack](https://github.com/garrytan/gstack) fork that adds `plan-u
 
 `audit-discovery --profile-file` and `sync --discovery-profile` accept JSON with:
 
-- `sources`: ordered list. Each entry is either a **string** (path, treated as platform `["*"]`) or an **object**:
-  - `path` (required): root directory
-  - `platform` (required): list of platform labels
-  - `exclude` (optional): list of glob patterns relative to `path` to skip during discovery (e.g. `[".agents/*", ".factory/*"]`)
+- `sources`: ordered list. Each entry is either a **string** (path, treated as platform `["*"]` — sync/apply to all) or an **object** `{ "path": "~/.cursor/skills-cursor", "platform": ["cursor"] }`.
 - `exclude_sources`: path strings (unchanged).
 - `collapse_identical`: boolean (unchanged).
 
-Known platform labels (convention): `cursor`, `claude-code`, `codex`, `factory`. Use `"*"` inside `platform` to mean "all targets."
+Known platform labels (convention): `cursor`, `claude-code`. Use `"*"` inside `platform` to mean “all targets.”
 
 `audit-discovery` without `--profile-file` uses default roots and **infers** platforms (e.g. `~/.claude/skills` → `claude-code`, `skills-cursor` → `cursor`, shared `~/.cursor/skills` → both).
 
@@ -311,6 +308,97 @@ See `config/discovery-profile.cursor-jz.example.json`:
 - Includes user, built-in, project, and plugin roots
 - Excludes plugin cache to reduce duplicate noise
 - Keeps `collapse_identical=true` for stable canonical preview
+
+## Select-One Routing (v0.6.0)
+
+For multi-platform skill packs (e.g. gstack shipping primary + `.agents/` + `.factory/` variants), `route` replaces `dedup` with a four-phase state-machine pipeline:
+
+```
+DISCOVERED → CLASSIFIED → ROUTED → RESOLVED
+```
+
+- **Phase 1 (Discover)**: hash all variants of each skill identity
+- **Phase 2 (Classify)**: infer platform via path convention (`.agents/` → codex, `.factory/` → factory) or fallback to wildcard
+- **Phase 3 (Route)**: exact platform match beats wildcard; select one variant per identity
+- **Phase 4 (Resolve)**: terminal state per variant — `ACTIVE` / `ARCHIVED` / `DELETED` / `KEPT_HIDDEN` / `FLAGGED`
+
+Every transition is recorded in a JSON trace file under `~/.skills-auditor/traces/`.
+
+```bash
+# Dry-run: see what route would do for Cursor
+skills-audit route --platform cursor --skills-dir "$HOME/.cursor/skills"
+
+# Apply with archive strategy (superseded variants renamed, recoverable)
+skills-audit route --platform cursor --skills-dir "$HOME/.cursor/skills" --strategy archive --apply
+
+# Route for Codex — selects .agents/ variants, archives the rest
+skills-audit route --platform codex --skills-dir "$HOME/.claude/skills" --apply
+```
+
+### Resolve strategies
+
+| Strategy | Superseded variants become | Use when |
+|----------|---------------------------|----------|
+| `archive` (default) | Renamed to `SKILL.md.archived-<timestamp>` | Safe — can undo |
+| `delete` | Removed from disk | Confident cleanup |
+| `keep` | Left in place (no filesystem change) | Audit-only, no side effects |
+
+### State machine audit
+
+Validate accumulated traces against transition rules:
+
+```bash
+# Audit all traces in default dir (~/.skills-auditor/traces/)
+skills-audit audit-state-machine
+
+# Audit traces from a specific directory
+skills-audit audit-state-machine --trace-dir ./my-traces
+```
+
+Checks performed: illegal transitions, terminal state coverage, dead/unused states, signal coverage gaps, UNROUTABLE frequency, cross-run consistency (same skill selecting different variants across runs).
+
+## Isolation Harness Recommendations
+
+Each `route` or `audit-state-machine` run should produce **reproducible, context-free results**. When an AI agent runs multiple audits in one session, prior decisions and cached impressions can bias later runs (context pollution). The fix: run the fact-collection phase in an **isolated subagent** with zero prior context.
+
+### Minimum viable isolation
+
+Use your IDE's native subagent mechanism with `readonly: true`:
+
+- **Cursor**: `Task` tool with `subagent_type: "shell"`, `readonly: true`
+- **Claude Code**: scope with `--allowedTools`
+
+### Dedicated harnesses
+
+| Harness | Stars | Isolation model | Best for |
+|---------|-------|----------------|----------|
+| [subagent-harness](https://github.com/ERerGB/subagent-harness) | — | SSOT compile → per-runtime artifact; each invocation is stateless by design | Cursor / Claude Code / Codex ecosystems — compile the audit SKILL.md into an isolated subagent artifact, run it, collect structured trace |
+| [dmux](https://github.com/standardagents/dmux) | 1.3k | git worktree per agent; parallel runs, smart merge | Running N audit configs in parallel (e.g. `--platform cursor` + `--platform codex` simultaneously), then merging trace results — similar to a `/batch` dispatch pattern |
+| [CrewAI](https://github.com/crewAIInc/crewAI) | 48k | Role-based delegation with hierarchical process | Teams already in the CrewAI ecosystem needing audit as a delegated worker task |
+
+### Cursor Task invocation template
+
+```
+Task(
+  subagent_type: "shell"
+  model: "fast"
+  description: "Audit skills for <platform>"
+  prompt: |
+    Run the following commands and return their full stdout.
+    Do NOT interpret or summarize — return raw output only.
+
+    cd /path/to/skills-auditor && python -m skills_auditor.cli route \
+      --platform <platform> \
+      --skills-dir ~/.cursor/skills \
+      --strategy archive
+
+    Then run:
+    python -m skills_auditor.cli audit-state-machine
+
+    Return both outputs verbatim.
+  readonly: true
+)
+```
 
 ## Safety Notes
 

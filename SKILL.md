@@ -16,48 +16,19 @@ description: Audit and synchronize local skill directories by detecting broken l
 ## Isolation: Run as Subagent
 
 Each audit or route run should produce **reproducible, context-free results**.
-To avoid session context bleeding between runs (prior decisions, cached
-impressions, stale file reads), invoke `skills-audit` from an **isolated
-subagent** whenever the runtime supports it.
+To avoid session context bleeding between runs, invoke `skills-audit` from
+an **isolated subagent** whenever the runtime supports it.
 
 > **Principle**: Trace data is fact. Interpretation is inference. Keep them
 > separated by running the fact-collection phase in a zero-context subagent.
 
-### Recommended harnesses (parallel options)
+**Minimum viable isolation**: use your IDE's native subagent/Task mechanism
+with `readonly: true` (Cursor `Task` tool, Claude Code `--allowedTools`).
 
-| Harness | Isolation model | Best for |
-|---------|----------------|----------|
-| [subagent-harness](https://github.com/ERerGB/subagent-harness) | SSOT compile → per-runtime artifact; each invocation is stateless by design | Cursor / Claude Code / Codex ecosystems — compile this SKILL.md into an isolated subagent artifact, run it, collect structured trace |
-| [dmux](https://github.com/standardagents/dmux) (1.3k stars) | git worktree per agent; parallel runs, smart merge | Running N audit configs in parallel (e.g. `--platform cursor` + `--platform codex` simultaneously), then merging trace results |
-| [CrewAI](https://github.com/crewAIInc/crewAI) (48k stars) | Role-based delegation with hierarchical process | Teams already in CrewAI ecosystem needing audit as a delegated worker task |
-
-**Minimum viable isolation** (no external harness): use your IDE's native
-subagent/Task mechanism with `readonly: true`. In Cursor, this is the `Task`
-tool. In Claude Code, this is `--allowedTools` scoping.
-
-### Subagent invocation template (Cursor Task)
-
-```
-Task(
-  subagent_type: "shell"
-  model: "fast"
-  description: "Audit skills for <platform>"
-  prompt: |
-    Run the following command and return its full stdout as your response.
-    Do NOT interpret or summarize — return raw output only.
-
-    cd /path/to/skills-auditor && python -m skills_auditor.cli route \
-      --platform <platform> \
-      --skills-dir ~/.cursor/skills \
-      --strategy archive
-
-    Then run:
-    python -m skills_auditor.cli audit-state-machine
-
-    Return both outputs verbatim.
-  readonly: true
-)
-```
+For dedicated harness options (SSOT compilation, git-worktree parallelism,
+role-based delegation), see the
+[Isolation Harness Recommendations](https://github.com/ERerGB/skills-auditor#isolation-harness-recommendations)
+section in the project README.
 
 ## Workflow
 
