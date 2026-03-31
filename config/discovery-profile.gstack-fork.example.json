@@ -1,0 +1,8 @@
+{
+  "sources": [
+    "~/.claude/skills",
+    "~/.claude/skills/gstack/plan-ux-review"
+  ],
+  "exclude_sources": [],
+  "collapse_identical": true
+}

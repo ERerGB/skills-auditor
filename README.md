@@ -78,6 +78,13 @@ skills-audit sync \
   --apply
 ```
 
+## gstack fork (`plan-ux-review`)
+
+If you use a [gstack](https://github.com/garrytan/gstack) fork that adds `plan-ux-review/` (for example `https://github.com/ERerGB/gstack`):
+
+- **Discovery:** use `config/discovery-profile.gstack-fork.example.json`, or the updated `config/discovery-profile.cursor-jz.example.json` (includes `~/.claude/skills` and the nested skill path).
+- **Sync dry-run:** `skills-audit sync --skills-dir ~/.claude/skills --map-file config/sources.gstack-fork.example.json`
+
 ## Mapping File
 
 `sync` uses a JSON map from skill name to canonical source directory:

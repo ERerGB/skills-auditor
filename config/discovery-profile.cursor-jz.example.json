@@ -3,6 +3,8 @@
     "~/.cursor/skills",
     "~/.cursor/skills-cursor",
     "/Users/j.z/code/fulmail/.cursor/skills",
+    "~/.claude/skills",
+    "~/.claude/skills/gstack/plan-ux-review",
     "~/.cursor/plugins"
   ],
   "exclude_sources": [
