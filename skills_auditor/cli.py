@@ -258,7 +258,11 @@ def _skill_md_path_is_under_ignored_segment(skill_md: Path) -> bool:
 
 @dataclass
 class DuplicateSkillNameFinding:
-    """Same frontmatter `name:` declared by more than one SKILL.md under one bundle."""
+    """Same frontmatter `name:` declared by more than one distinct SKILL.md file under one bundle.
+
+    Paths listed are one representative path per resolved real file (symlinks to the same
+    inode count once).
+    """
 
     bundle: str
     skill_name: str
@@ -270,6 +274,10 @@ def collect_duplicate_skill_names(skills_dir: Path) -> List[DuplicateSkillNameFi
 
     Catches packs like gstack that ship `.agents/skills/gstack/SKILL.md` alongside `gstack/SKILL.md`,
     which can confuse hosts that index recursively (multiple `/gstack` in the Skill list).
+
+    Multiple paths that are symlinks to the same resolved file are folded into one entry
+    (dedupe by ``Path.resolve()``), avoiding false positives for DRY symlink layouts
+    (see https://github.com/ERerGB/skills-auditor/issues/2).
     """
     findings: List[DuplicateSkillNameFinding] = []
     if not skills_dir.exists() or not skills_dir.is_dir():
@@ -287,27 +295,34 @@ def collect_duplicate_skill_names(skills_dir: Path) -> List[DuplicateSkillNameFi
         if not root.is_dir():
             continue
 
-        by_name: Dict[str, List[Path]] = {}
+        # name -> { resolved_realpath_str: representative Path }
+        by_name: Dict[str, Dict[str, Path]] = {}
         try:
             for skill_md in root.rglob("SKILL.md"):
                 if _skill_md_path_is_under_ignored_segment(skill_md):
                     continue
                 try:
+                    real_key = str(skill_md.resolve())
+                except OSError:
+                    continue
+                try:
                     name = parse_skill_name(skill_md)
                 except OSError:
                     continue
-                by_name.setdefault(name, []).append(skill_md)
+                bucket = by_name.setdefault(name, {})
+                if real_key not in bucket:
+                    bucket[real_key] = skill_md
         except OSError:
             continue
 
         for skill_name in sorted(by_name.keys()):
-            paths = sorted(by_name[skill_name], key=lambda p: str(p).lower())
-            if len(paths) > 1:
+            reps = sorted(by_name[skill_name].values(), key=lambda p: str(p).lower())
+            if len(reps) > 1:
                 findings.append(
                     DuplicateSkillNameFinding(
                         bundle=entry.name,
                         skill_name=skill_name,
-                        skill_md_paths=[str(p) for p in paths],
+                        skill_md_paths=[str(p) for p in reps],
                     )
                 )
     return findings
@@ -319,8 +334,8 @@ def print_duplicate_name_check(
 ) -> None:
     print("\nduplicate frontmatter name: check (per top-level bundle)")
     print(
-        "Detects multiple SKILL.md files declaring the same `name:` under one install folder "
-        "(e.g. gstack + .agents copy)."
+        "Detects multiple distinct SKILL.md files (by resolved path) declaring the same `name:` "
+        "under one install folder (e.g. gstack + .agents copy). Symlinks to the same file count once."
     )
     if not findings:
         print("status: ok (no duplicate names within any bundle)")

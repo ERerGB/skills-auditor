@@ -35,6 +35,26 @@ class TestDuplicateNames(unittest.TestCase):
             self.assertEqual(found[0].skill_name, "pack")
             self.assertEqual(len(found[0].skill_md_paths), 2)
 
+    def test_symlinks_to_same_file_not_duplicate(self) -> None:
+        """Symlinked SKILL.md pointing at canonical file — one logical skill (issue #2)."""
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base)
+            skills = root / "skills"
+            skills.mkdir()
+            pack = skills / "pkg"
+            pack.mkdir()
+            canon = pack / "SKILL.md"
+            canon.write_text("---\nname: pkg\n---\n", encoding="utf-8")
+            mirror = pack / "mirror"
+            mirror.mkdir()
+            link = mirror / "SKILL.md"
+            try:
+                link.symlink_to(canon)
+            except OSError:
+                self.skipTest("symlink creation not supported in this environment")
+            found = collect_duplicate_skill_names(skills)
+            self.assertEqual(found, [], msg=str(found))
+
 
 if __name__ == "__main__":
     unittest.main()
