@@ -1,7 +1,7 @@
 {
   "sources": [
-    "~/.claude/skills",
-    "~/.claude/skills/gstack/plan-ux-review"
+    { "path": "~/.claude/skills", "platform": ["claude-code"] },
+    { "path": "~/.claude/skills/gstack/plan-ux-review", "platform": ["claude-code"] }
   ],
   "exclude_sources": [],
   "collapse_identical": true

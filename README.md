@@ -23,8 +23,10 @@ This repo provides a safe workflow:
 - Detect symlink health (`ok` / `broken`)
 - Detect folder mode (`symlink` / `directory` / `file`)
 - Audit discovery-layer collisions across multiple sources
-- Build canonical injection preview with source priority
+- **Platform-tagged discovery profiles** (`cursor`, `claude-code`, or `*`): see below
+- Build canonical injection preview with source priority (includes per-source platforms)
 - Sync selected skills to canonical sources via mapping file
+- **Optional `--target-platform` + `--discovery-profile`** on `sync` to skip skills whose canonical path lives under a source that does not allow that platform
 - Safe replacement: existing directories are archived before relinking
 - Default dry-run behavior
 
@@ -44,6 +46,13 @@ This installs the **`skills-audit`** console script and enables **`python -m ski
 **Global CLI (optional):** `pipx install /path/to/skills-auditor` (or `pipx install .` from the repo).
 
 **Without any install:** run **`python3 scripts/skills_audit.py`** from the repo root (it prepends the repo to `sys.path`).
+
+## Tests
+
+```bash
+cd /path/to/skills-auditor
+python3 -m unittest discover -s tests -v
+```
 
 ## Quick Start
 
@@ -82,8 +91,23 @@ skills-audit sync \
 
 If you use a [gstack](https://github.com/garrytan/gstack) fork that adds `plan-ux-review/` (for example `https://github.com/ERerGB/gstack`):
 
-- **Discovery:** use `config/discovery-profile.gstack-fork.example.json`, or the updated `config/discovery-profile.cursor-jz.example.json` (includes `~/.claude/skills` and the nested skill path).
-- **Sync dry-run:** `skills-audit sync --skills-dir ~/.claude/skills --map-file config/sources.gstack-fork.example.json`
+- **Discovery:** use `config/discovery-profile.gstack-fork.example.json`, or `config/discovery-profile.cursor-jz.example.json`.
+- **Sync dry-run (Claude only, skip Cursor-only sources in the profile):**
+  `skills-audit sync --skills-dir ~/.claude/skills --map-file config/sources.gstack-fork.example.json --discovery-profile config/discovery-profile.cursor-jz.example.json --target-platform claude-code`
+
+## Discovery profile format
+
+`audit-discovery --profile-file` and `sync --discovery-profile` accept JSON with:
+
+- `sources`: ordered list. Each entry is either a **string** (path, treated as platform `["*"]` — sync/apply to all) or an **object** `{ "path": "~/.cursor/skills-cursor", "platform": ["cursor"] }`.
+- `exclude_sources`: path strings (unchanged).
+- `collapse_identical`: boolean (unchanged).
+
+Known platform labels (convention): `cursor`, `claude-code`. Use `"*"` inside `platform` to mean “all targets.”
+
+`audit-discovery` without `--profile-file` uses default roots and **infers** platforms (e.g. `~/.claude/skills` → `claude-code`, `skills-cursor` → `cursor`, shared `~/.cursor/skills` → both).
+
+Design note: platform metadata lives in the **profile** (management layer), not in each `SKILL.md`. See [issue #1](https://github.com/ERerGB/skills-auditor/issues/1).
 
 ## Mapping File
 
@@ -123,6 +147,16 @@ skills-audit sync \
 ```
 
 Use `--apply` to execute changes.
+
+**Platform-aware sync:** when you use the same map against both Cursor and Claude Code trees, pass the same discovery profile and `--target-platform cursor` or `claude-code`. Entries whose map target path falls under a profile source that does not list that platform are reported as `skip_platform` (no symlink changes).
+
+```bash
+skills-audit sync \
+  --skills-dir "$HOME/.claude/skills" \
+  --map-file config/sources.example.json \
+  --discovery-profile config/discovery-profile.cursor-jz.example.json \
+  --target-platform claude-code
+```
 
 ### `audit-discovery`
 

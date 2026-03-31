@@ -11,10 +11,22 @@ import json
 import os
 import re
 import subprocess
+import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+# Sentinel: source applies to all target platforms when syncing / filtering.
+PLATFORM_WILDCARD = "*"
+
+
+@dataclass
+class SourceSpec:
+    """One discovery root path and which agent platforms may consume skills from it."""
+
+    path: Path
+    platforms: List[str]
 
 
 @dataclass
@@ -44,6 +56,8 @@ class DiscoveryItem:
     relative_path: str
     content_hash: str
     source_priority: int
+    # Platforms tagged on the discovery source (management layer); default ["*"].
+    source_platforms: List[str]
 
 
 @dataclass
@@ -241,7 +255,13 @@ def discover_from_source(
     source_root: Path,
     source_priority: int,
     excluded_roots: List[Path],
+    source_platforms: Optional[List[str]] = None,
 ) -> List[DiscoveryItem]:
+    plats = (
+        source_platforms
+        if source_platforms is not None
+        else [PLATFORM_WILDCARD]
+    )
     items: List[DiscoveryItem] = []
     if not source_root.exists():
         return items
@@ -267,6 +287,7 @@ def discover_from_source(
                         relative_path=str(child.relative_to(source_root)),
                         content_hash=file_hash(skill_md),
                         source_priority=source_priority,
+                        source_platforms=list(plats),
                     )
                 )
 
@@ -289,6 +310,7 @@ def discover_from_source(
                 relative_path=rel,
                 content_hash=file_hash(skill_md),
                 source_priority=source_priority,
+                source_platforms=list(plats),
             )
         )
     return items
@@ -337,24 +359,106 @@ def default_discovery_sources() -> List[Path]:
     return dedup
 
 
+def infer_default_platforms_for_source(root: Path) -> List[str]:
+    """Heuristic platforms for built-in default discovery roots (no profile file)."""
+    try:
+        key = str(root.resolve()).lower()
+    except OSError:
+        key = str(root.expanduser()).lower()
+    if ".claude" in key and "skills" in key:
+        return ["claude-code"]
+    if "skills-cursor" in key:
+        return ["cursor"]
+    if "cursor" in key and "plugins" in key:
+        return ["cursor"]
+    # Shared project or ~/.cursor/skills — safe for both.
+    return ["cursor", "claude-code"]
+
+
+def parse_profile_source_entries(sources_raw: object) -> List[SourceSpec]:
+    """Parse profile `sources`: string or { path, platform: [...] } per entry."""
+    if not isinstance(sources_raw, list):
+        raise ValueError("'sources' must be a list.")
+    specs: List[SourceSpec] = []
+    for idx, item in enumerate(sources_raw):
+        if isinstance(item, str):
+            specs.append(SourceSpec(Path(item).expanduser(), [PLATFORM_WILDCARD]))
+            continue
+        if isinstance(item, dict):
+            path_v = item.get("path")
+            plat_v = item.get("platform")
+            if not isinstance(path_v, str):
+                raise ValueError(
+                    f"sources[{idx}]: object entry requires string 'path'."
+                )
+            if not isinstance(plat_v, list) or not plat_v:
+                raise ValueError(
+                    f"sources[{idx}]: object entry requires non-empty list 'platform'."
+                )
+            if not all(isinstance(x, str) for x in plat_v):
+                raise ValueError(
+                    f"sources[{idx}]: 'platform' must be a list of strings."
+                )
+            specs.append(SourceSpec(Path(path_v).expanduser(), list(plat_v)))
+            continue
+        raise ValueError(
+            f"sources[{idx}]: each entry must be a string or object with path + platform."
+        )
+    return specs
+
+
 def load_discovery_profile(profile_file: Path) -> Dict[str, object]:
     data = json.loads(profile_file.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("Discovery profile must be a JSON object.")
-    sources = data.get("sources", [])
+    sources_raw = data.get("sources", [])
     exclude_sources = data.get("exclude_sources", [])
     collapse_identical = data.get("collapse_identical", True)
-    if not isinstance(sources, list) or not all(isinstance(x, str) for x in sources):
-        raise ValueError("'sources' must be a string list.")
-    if not isinstance(exclude_sources, list) or not all(isinstance(x, str) for x in exclude_sources):
+    source_specs = parse_profile_source_entries(sources_raw)
+    if not isinstance(exclude_sources, list) or not all(
+        isinstance(x, str) for x in exclude_sources
+    ):
         raise ValueError("'exclude_sources' must be a string list.")
     if not isinstance(collapse_identical, bool):
         raise ValueError("'collapse_identical' must be a boolean.")
     return {
-        "sources": sources,
+        "source_specs": source_specs,
         "exclude_sources": exclude_sources,
         "collapse_identical": collapse_identical,
     }
+
+
+def platform_allows_target(source_platforms: List[str], target_platform: str) -> bool:
+    if PLATFORM_WILDCARD in source_platforms:
+        return True
+    return target_platform in source_platforms
+
+
+def longest_matching_source_platforms(
+    skill_target: Path,
+    source_specs: List[SourceSpec],
+) -> List[str]:
+    """Pick the longest profile source root that contains skill_target; else ['*']."""
+    try:
+        skill_resolved = skill_target.expanduser().resolve()
+    except OSError:
+        return [PLATFORM_WILDCARD]
+    best: Optional[List[str]] = None
+    best_len = -1
+    for spec in source_specs:
+        try:
+            root_r = spec.path.expanduser().resolve()
+        except OSError:
+            continue
+        try:
+            skill_resolved.relative_to(root_r)
+        except ValueError:
+            continue
+        ln = len(str(root_r))
+        if ln > best_len:
+            best_len = ln
+            best = list(spec.platforms)
+    return best if best is not None else [PLATFORM_WILDCARD]
 
 
 def build_discovery(
@@ -414,11 +518,32 @@ def summarize_discovery(choices: List[DiscoveryChoice]) -> DiscoverySummary:
     )
 
 
-def plan_sync(skills_dir: Path, mapping: Dict[str, str]) -> List[SyncAction]:
+def plan_sync(
+    skills_dir: Path,
+    mapping: Dict[str, str],
+    *,
+    target_platform: Optional[str] = None,
+    source_specs: Optional[List[SourceSpec]] = None,
+) -> List[SyncAction]:
     actions: List[SyncAction] = []
     for name, target_str in mapping.items():
         entry = skills_dir / name
         target = Path(target_str).expanduser()
+        if target_platform and source_specs:
+            plat = longest_matching_source_platforms(target, source_specs)
+            if not platform_allows_target(plat, target_platform):
+                actions.append(
+                    SyncAction(
+                        name=name,
+                        expected_target=str(target),
+                        action="skip_platform",
+                        reason=(
+                            f"source platforms {plat!r} do not allow "
+                            f"sync target {target_platform!r}"
+                        ),
+                    )
+                )
+                continue
         if not target.exists():
             actions.append(
                 SyncAction(
@@ -493,7 +618,7 @@ def apply_actions(skills_dir: Path, actions: List[SyncAction]) -> None:
         entry = skills_dir / action.name
         target = Path(action.expected_target).expanduser().resolve()
 
-        if action.action in {"noop", "skip_error"}:
+        if action.action in {"noop", "skip_error", "skip_platform"}:
             continue
 
         if action.action == "create_link":
@@ -574,7 +699,7 @@ def print_plan(actions: List[SyncAction], apply: bool) -> None:
 
 
 def print_discovery_report(
-    sources: List[Path],
+    source_specs: List[SourceSpec],
     excluded_sources: List[Path],
     collapse_identical: bool,
     items: List[DiscoveryItem],
@@ -599,8 +724,9 @@ def print_discovery_report(
         return
 
     print("sources (priority order):")
-    for idx, src in enumerate(sources):
-        print(f"{idx}\t{src.expanduser()}")
+    for idx, spec in enumerate(source_specs):
+        plat = ",".join(spec.platforms)
+        print(f"{idx}\t{spec.path.expanduser()}\t{plat}")
     print("\nexcluded source roots:")
     if excluded_sources:
         for src in excluded_sources:
@@ -610,21 +736,26 @@ def print_discovery_report(
     print(f"\ncollapse_identical: {str(collapse_identical).lower()}")
 
     print("\nall discovered candidates:")
-    print("skill_name\tsource_priority\tsource_root\tskill_root\thash")
+    print(
+        "skill_name\tsource_priority\tsource_platforms\t"
+        "source_root\tskill_root\thash"
+    )
     for item in sorted(items, key=lambda x: (x.skill_name, x.source_priority, x.skill_root)):
+        plat = ",".join(item.source_platforms)
         print(
-            f"{item.skill_name}\t{item.source_priority}\t{item.source_root}\t"
+            f"{item.skill_name}\t{item.source_priority}\t{plat}\t{item.source_root}\t"
             f"{item.skill_root}\t{item.content_hash[:12]}"
         )
 
     print("\ncanonical injection preview:")
     print(
-        "skill_name\tcanonical_skill_root\ttotal_candidates\teffective_candidates\t"
-        "collapsed_identical\thash_conflict"
+        "skill_name\tcanonical_skill_root\tcanonical_source_platforms\t"
+        "total_candidates\teffective_candidates\tcollapsed_identical\thash_conflict"
     )
-    for choice in choices:
+    for choice, can_item in zip(choices, canonical_items):
+        plat = ",".join(can_item.source_platforms)
         print(
-            f"{choice.skill_name}\t{choice.canonical_skill_root}\t"
+            f"{choice.skill_name}\t{choice.canonical_skill_root}\t{plat}\t"
             f"{choice.total_candidates}\t{choice.effective_candidates}\t"
             f"{len(choice.collapsed_identical_roots)}\t{str(choice.hash_conflict).lower()}"
         )
@@ -633,7 +764,13 @@ def print_discovery_report(
     print(
         json.dumps(
             {
-                "sources": [str(s.expanduser()) for s in sources],
+                "sources": [
+                    {
+                        "path": str(spec.path.expanduser()),
+                        "platform": list(spec.platforms),
+                    }
+                    for spec in source_specs
+                ],
                 "excluded_sources": [str(s.expanduser()) for s in excluded_sources],
                 "collapse_identical": collapse_identical,
                 "candidates": [asdict(i) for i in items],
@@ -702,6 +839,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skill root (repeat for multiple). Default: ~/.cursor/skills",
     )
     p_sync.add_argument("--map-file", required=True, help="JSON map file: {name: targetPath}")
+    p_sync.add_argument(
+        "--target-platform",
+        metavar="NAME",
+        help=(
+            "Only sync skills whose map target path matches a profile source that allows "
+            "this platform (e.g. claude-code, cursor). Requires --discovery-profile."
+        ),
+    )
+    p_sync.add_argument(
+        "--discovery-profile",
+        metavar="FILE",
+        help="Discovery profile JSON (same as audit-discovery) for platform-aware sync.",
+    )
     p_sync.add_argument("--apply", action="store_true", help="Apply actions (default is dry-run)")
 
     p_discovery = sub.add_parser(
@@ -781,14 +931,30 @@ def main() -> int:
         return 0
 
     if args.command == "sync":
+        if args.target_platform and not args.discovery_profile:
+            print(
+                "error: --target-platform requires --discovery-profile "
+                "(need source path → platform tags).",
+                file=sys.stderr,
+            )
+            return 2
         map_file = Path(args.map_file).expanduser()
         mapping = load_mapping(map_file)
+        sync_specs: Optional[List[SourceSpec]] = None
+        if args.discovery_profile:
+            prof = load_discovery_profile(Path(args.discovery_profile).expanduser())
+            sync_specs = prof["source_specs"]  # type: ignore[assignment]
         roots = resolve_skills_dirs(args.skills_dirs)
         for idx, skills_dir in enumerate(roots):
             if idx > 0:
                 print()
             print(f"skills-dir: {skills_dir}")
-            actions = plan_sync(skills_dir, mapping)
+            actions = plan_sync(
+                skills_dir,
+                mapping,
+                target_platform=args.target_platform,
+                source_specs=sync_specs,
+            )
             print_plan(actions, args.apply)
             if args.apply:
                 apply_actions(skills_dir, actions)
@@ -798,28 +964,46 @@ def main() -> int:
 
     if args.command == "audit-discovery":
         profile: Dict[str, object] = {}
-        if args.profile_file:
-            profile = load_discovery_profile(Path(args.profile_file).expanduser())
-
-        profile_sources = [Path(s).expanduser() for s in profile.get("sources", [])]
-        profile_excluded = [Path(s).expanduser() for s in profile.get("exclude_sources", [])]
-        profile_collapse = bool(profile.get("collapse_identical", True))
+        profile_excluded: List[Path] = []
+        profile_collapse = True
+        source_specs: List[SourceSpec] = []
 
         cli_sources = [Path(s).expanduser() for s in args.source]
         cli_excluded = [Path(s).expanduser() for s in args.exclude_source]
 
-        sources = cli_sources or profile_sources or default_discovery_sources()
+        if args.profile_file:
+            profile = load_discovery_profile(Path(args.profile_file).expanduser())
+            source_specs = profile["source_specs"]  # type: ignore[assignment]
+            profile_excluded = [
+                Path(s).expanduser() for s in profile.get("exclude_sources", [])
+            ]
+            profile_collapse = bool(profile.get("collapse_identical", True))
+
+        if cli_sources:
+            source_specs = [
+                SourceSpec(p, [PLATFORM_WILDCARD]) for p in cli_sources
+            ]
+        elif not source_specs:
+            defaults = default_discovery_sources()
+            source_specs = [
+                SourceSpec(p, infer_default_platforms_for_source(p)) for p in defaults
+            ]
+
         excluded_sources = profile_excluded + cli_excluded
         collapse_identical = profile_collapse and (not args.no_collapse_identical)
 
         all_items: List[DiscoveryItem] = []
-        for idx, src in enumerate(sources):
-            all_items.extend(discover_from_source(src, idx, excluded_sources))
+        for idx, spec in enumerate(source_specs):
+            all_items.extend(
+                discover_from_source(
+                    spec.path, idx, excluded_sources, spec.platforms
+                )
+            )
 
         choices, canonical_items = build_discovery(all_items, collapse_identical=collapse_identical)
         summary = summarize_discovery(choices)
         print_discovery_report(
-            sources,
+            source_specs,
             excluded_sources,
             collapse_identical,
             all_items,

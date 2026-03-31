@@ -18,7 +18,7 @@ description: Audit and synchronize local skill directories by detecting broken l
 2. Run drift check (`drift-check`) to verify local-remote sync.
 3. Run discovery-layer audit (`audit-discovery`) to detect collisions.
 4. If user wants canonical sync, prepare a JSON mapping file.
-5. Run sync in dry-run mode and review planned actions.
+5. Run sync in dry-run mode and review planned actions. For cross-agent installs, use `--discovery-profile` and `--target-platform` (see repo README).
 6. Run sync with `--apply` only after approval.
 7. Re-run `audit --with-drift` to verify final state.
 

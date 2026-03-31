@@ -1,11 +1,11 @@
 {
   "sources": [
-    "~/.cursor/skills",
-    "~/.cursor/skills-cursor",
-    "/Users/j.z/code/fulmail/.cursor/skills",
-    "~/.claude/skills",
-    "~/.claude/skills/gstack/plan-ux-review",
-    "~/.cursor/plugins"
+    { "path": "~/.cursor/skills", "platform": ["cursor", "claude-code"] },
+    { "path": "~/.cursor/skills-cursor", "platform": ["cursor"] },
+    { "path": "/Users/j.z/code/fulmail/.cursor/skills", "platform": ["cursor", "claude-code"] },
+    { "path": "~/.claude/skills", "platform": ["claude-code"] },
+    { "path": "~/.claude/skills/gstack/plan-ux-review", "platform": ["claude-code"] },
+    { "path": "~/.cursor/plugins", "platform": ["cursor"] }
   ],
   "exclude_sources": [
     "~/.cursor/plugins/cache"
