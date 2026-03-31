@@ -17,11 +17,12 @@ description: Audit and synchronize local skill directories by detecting broken l
 1. Run filesystem audit first (`audit`).
 2. Run drift check (`drift-check`) to verify local-remote sync.
 3. Run discovery-layer audit (`audit-discovery`) to detect collisions.
-4. If user wants canonical sync, prepare a JSON mapping file.
-5. Run sync in dry-run mode and review planned actions. For cross-agent installs, use `--discovery-profile` and `--target-platform` (see repo README).
-6. Run sync with `--apply` only after approval.
-7. Re-run `audit --with-drift` to verify final state.
-8. **`audit` runs a duplicate-name check by default** (same `name:` on more than one **resolved** `SKILL.md` under one bundle; symlinks to the same file count once). E.g. gstack `.agents` copies vs primary trees. Use `--skip-duplicate-name-check` to turn off; `--fail-on-duplicate-names` for CI exit code 4.
+4. **Dedup bundles with mirror copies** (`dedup --apply`) — replaces duplicate SKILL.md files with symlinks to the canonical (shortest-path) file. Best practice after installing or updating skill packs.
+5. If user wants canonical sync, prepare a JSON mapping file.
+6. Run sync in dry-run mode and review planned actions. For cross-agent installs, use `--discovery-profile` and `--target-platform` (see repo README).
+7. Run sync with `--apply` only after approval.
+8. Re-run `audit --with-drift` to verify final state.
+9. **`audit` runs a duplicate-name check by default** (same `name:` on more than one **resolved** `SKILL.md` under one bundle; symlinks to the same file count once). E.g. gstack `.agents` copies vs primary trees. Use `--skip-duplicate-name-check` to turn off; `--fail-on-duplicate-names` for CI exit code 4.
 
 ## Commands
 
@@ -76,6 +77,15 @@ skills-audit audit-discovery \
   --summary-only \
   --fail-on-conflict \
   --fail-on-hash-conflict
+
+# Dedup: dry-run (detect duplicate names, plan symlink replacements)
+skills-audit dedup \
+  --skills-dir "$PRIMARY_SKILLS_DIR"
+
+# Dedup: apply (replace duplicates with symlinks to canonical)
+skills-audit dedup \
+  --skills-dir "$HOME/.claude/skills" \
+  --apply
 
 # Apply sync
 skills-audit sync \

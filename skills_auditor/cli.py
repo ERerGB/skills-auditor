@@ -363,6 +363,106 @@ def print_duplicate_name_check(
     )
 
 
+@dataclass
+class DedupAction:
+    """One planned symlink replacement for a duplicate SKILL.md."""
+
+    bundle: str
+    skill_name: str
+    canonical_path: str
+    duplicate_path: str
+    action: str  # relink | skip_not_file | dry_run
+    reason: str
+
+
+def plan_dedup(
+    skills_dir: Path,
+) -> Tuple[List[DedupAction], List[DuplicateSkillNameFinding]]:
+    """Build a dedup plan: for each duplicate-name group, pick canonical and relink the rest.
+
+    Canonical heuristic: shortest path relative to the bundle root (closest to top-level).
+    Ties broken alphabetically.
+    """
+    findings = collect_duplicate_skill_names(skills_dir)
+    actions: List[DedupAction] = []
+    for f in findings:
+        paths = [Path(p) for p in f.skill_md_paths]
+        # Pick canonical: shortest path string length, then alphabetical
+        paths_sorted = sorted(paths, key=lambda p: (len(str(p)), str(p).lower()))
+        canonical = paths_sorted[0]
+        for dup in paths_sorted[1:]:
+            if not dup.is_file():
+                actions.append(
+                    DedupAction(
+                        bundle=f.bundle,
+                        skill_name=f.skill_name,
+                        canonical_path=str(canonical),
+                        duplicate_path=str(dup),
+                        action="skip_not_file",
+                        reason="duplicate path is not a regular file",
+                    )
+                )
+                continue
+            actions.append(
+                DedupAction(
+                    bundle=f.bundle,
+                    skill_name=f.skill_name,
+                    canonical_path=str(canonical),
+                    duplicate_path=str(dup),
+                    action="relink",
+                    reason=f"replace with symlink to canonical",
+                )
+            )
+    return actions, findings
+
+
+def apply_dedup(actions: List[DedupAction]) -> int:
+    """Execute planned relink actions. Returns count of applied symlinks."""
+    applied = 0
+    for a in actions:
+        if a.action != "relink":
+            continue
+        dup = Path(a.duplicate_path)
+        canonical = Path(a.canonical_path)
+        rel = os.path.relpath(canonical, dup.parent)
+        dup.unlink()
+        dup.symlink_to(rel)
+        applied += 1
+    return applied
+
+
+def print_dedup_plan(
+    actions: List[DedupAction],
+    findings: List[DuplicateSkillNameFinding],
+    apply: bool,
+) -> None:
+    mode = "APPLY" if apply else "DRY-RUN"
+    print(f"dedup mode: {mode}")
+    if not findings:
+        print("status: ok (no duplicate names found)")
+        print("\njson:")
+        print(json.dumps({"actions": [], "findings": []}, indent=2))
+        return
+
+    print(f"findings: {len(findings)} duplicate name(s)")
+    print(f"planned actions: {len(actions)}")
+    print("\nbundle\tskill_name\taction\tduplicate_path\tcanonical_path")
+    for a in actions:
+        print(f"{a.bundle}\t{a.skill_name}\t{a.action}\t{a.duplicate_path}\t{a.canonical_path}")
+    print("\njson:")
+    print(
+        json.dumps(
+            {
+                "mode": mode.lower(),
+                "findings": [asdict(f) for f in findings],
+                "actions": [asdict(a) for a in actions],
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+
+
 def file_hash(path: Path) -> str:
     data = path.read_bytes()
     return hashlib.sha256(data).hexdigest()
@@ -990,6 +1090,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_sync.add_argument("--apply", action="store_true", help="Apply actions (default is dry-run)")
 
+    p_dedup = sub.add_parser(
+        "dedup",
+        help="Detect duplicate frontmatter names and replace copies with symlinks to the canonical file",
+    )
+    p_dedup.add_argument(
+        "--skills-dir",
+        action="append",
+        dest="skills_dirs",
+        metavar="DIR",
+        help="Skill root (repeat for multiple). Default: ~/.cursor/skills",
+    )
+    p_dedup.add_argument(
+        "--apply", action="store_true",
+        help="Actually replace duplicates with symlinks (default is dry-run).",
+    )
+
     p_discovery = sub.add_parser(
         "audit-discovery",
         help="Audit discovery-layer collisions and canonical skill selection",
@@ -1104,6 +1220,18 @@ def main() -> int:
                 apply_actions(skills_dir, actions)
         if args.apply:
             print("\nApplied actions. Re-run audit to verify final state.")
+        return 0
+
+    if args.command == "dedup":
+        for idx, skills_dir in enumerate(resolve_skills_dirs(args.skills_dirs)):
+            if idx > 0:
+                print()
+            print(f"skills-dir: {skills_dir}")
+            actions, findings = plan_dedup(skills_dir)
+            print_dedup_plan(actions, findings, args.apply)
+            if args.apply and actions:
+                applied = apply_dedup(actions)
+                print(f"\nApplied: {applied} symlink(s). Re-run audit to verify.")
         return 0
 
     if args.command == "audit-discovery":

@@ -161,6 +161,40 @@ skills-audit sync \
   --target-platform claude-code
 ```
 
+### `dedup`
+
+Detect duplicate frontmatter `name:` across nested SKILL.md files within each bundle, then replace non-canonical copies with relative symlinks to the shortest-path canonical file.
+
+This is the **recommended best practice** for skill packs that ship mirror directories (e.g. gstack's `.agents/skills/` and `.factory/skills/` alongside primary trees). Instead of maintaining multiple independent copies that drift apart, `dedup --apply` collapses them into symlinks so:
+
+- IDE skill lists show **one entry** per logical skill (not N copies)
+- Content stays DRY — edit the canonical file, all mirrors follow
+- `audit` duplicate-name check reports **zero findings** post-dedup
+- Future `./setup` runs that recreate copies can be re-deduped in one command
+
+```bash
+# Dry-run: see what would be relinked
+skills-audit dedup --skills-dir "$HOME/.claude/skills"
+
+# Apply: replace duplicates with symlinks
+skills-audit dedup --skills-dir "$HOME/.claude/skills" --apply
+
+# Verify: audit should show zero duplicate names
+skills-audit audit --skills-dir "$HOME/.claude/skills" --fail-on-duplicate-names
+```
+
+**Canonical selection heuristic:** shortest path relative to the bundle root wins. For a typical gstack layout:
+- `gstack/SKILL.md` (canonical — shortest)
+- `gstack/.agents/skills/gstack/SKILL.md` → symlink to `../../../SKILL.md`
+- `gstack/.factory/skills/gstack/SKILL.md` → symlink to `../../../SKILL.md`
+
+**Best practice workflow:**
+
+1. Install/update a skill pack (`./setup`, `git pull`, etc.)
+2. Run `skills-audit dedup --skills-dir <root> --apply`
+3. Run `skills-audit audit --skills-dir <root>` to verify
+4. Repeat after each pack update
+
 ### `audit-discovery`
 
 Inspect discovery-layer behavior across multiple skill sources and output:
