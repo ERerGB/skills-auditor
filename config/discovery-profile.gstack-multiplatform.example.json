@@ -1,0 +1,19 @@
+{
+  "sources": [
+    {
+      "path": "~/.claude/skills/gstack",
+      "platform": ["cursor", "claude-code"],
+      "exclude": [".agents/*", ".factory/*"]
+    },
+    {
+      "path": "~/.claude/skills/gstack/.agents/skills",
+      "platform": ["codex"]
+    },
+    {
+      "path": "~/.claude/skills/gstack/.factory/skills",
+      "platform": ["factory"]
+    }
+  ],
+  "exclude_sources": [],
+  "collapse_identical": true
+}

@@ -99,11 +99,14 @@ If you use a [gstack](https://github.com/garrytan/gstack) fork that adds `plan-u
 
 `audit-discovery --profile-file` and `sync --discovery-profile` accept JSON with:
 
-- `sources`: ordered list. Each entry is either a **string** (path, treated as platform `["*"]` — sync/apply to all) or an **object** `{ "path": "~/.cursor/skills-cursor", "platform": ["cursor"] }`.
+- `sources`: ordered list. Each entry is either a **string** (path, treated as platform `["*"]`) or an **object**:
+  - `path` (required): root directory
+  - `platform` (required): list of platform labels
+  - `exclude` (optional): list of glob patterns relative to `path` to skip during discovery (e.g. `[".agents/*", ".factory/*"]`)
 - `exclude_sources`: path strings (unchanged).
 - `collapse_identical`: boolean (unchanged).
 
-Known platform labels (convention): `cursor`, `claude-code`. Use `"*"` inside `platform` to mean “all targets.”
+Known platform labels (convention): `cursor`, `claude-code`, `codex`, `factory`. Use `"*"` inside `platform` to mean "all targets."
 
 `audit-discovery` without `--profile-file` uses default roots and **infers** platforms (e.g. `~/.claude/skills` → `claude-code`, `skills-cursor` → `cursor`, shared `~/.cursor/skills` → both).
 
@@ -165,35 +168,87 @@ skills-audit sync \
 
 Detect duplicate frontmatter `name:` across nested SKILL.md files within each bundle, then replace non-canonical copies with relative symlinks to the shortest-path canonical file.
 
-This is the **recommended best practice** for skill packs that ship mirror directories (e.g. gstack's `.agents/skills/` and `.factory/skills/` alongside primary trees). Instead of maintaining multiple independent copies that drift apart, `dedup --apply` collapses them into symlinks so:
+**Hash-aware dedup (v0.5.0):** `dedup` now compares file content hashes before acting:
 
-- IDE skill lists show **one entry** per logical skill (not N copies)
+- **Same hash → `relink`**: True duplicate, safe to replace with symlink.
+- **Different hash → `skip_multi_version`**: Host-specific variant (e.g. Codex-trimmed copy), preserved intact. The output reports the inferred platform (see Convention-based inference below).
+
+This prevents blindly symlinking files that intentionally differ for different platforms (e.g. gstack's `.agents/skills/` copies are trimmed for Codex).
+
+This is the **recommended best practice** for skill packs that ship mirror directories (e.g. gstack's `.agents/skills/` and `.factory/skills/` alongside primary trees). Instead of maintaining multiple independent copies that drift apart, `dedup --apply` collapses identical copies into symlinks so:
+
+- IDE skill lists show **one entry** per logical skill (not N copies) for true duplicates
 - Content stays DRY — edit the canonical file, all mirrors follow
-- `audit` duplicate-name check reports **zero findings** post-dedup
+- Host-specific variants (different content) are **never** overwritten — reported as `skip_multi_version` with inferred platform
+- `audit` duplicate-name check reports **zero findings** post-dedup (for identical copies)
 - Future `./setup` runs that recreate copies can be re-deduped in one command
 
 ```bash
-# Dry-run: see what would be relinked
+# Dry-run: see what would be relinked vs skipped
 skills-audit dedup --skills-dir "$HOME/.claude/skills"
 
-# Apply: replace duplicates with symlinks
+# Apply: replace identical duplicates with symlinks (multi-version variants untouched)
 skills-audit dedup --skills-dir "$HOME/.claude/skills" --apply
 
-# Verify: audit should show zero duplicate names
+# Verify: audit should show zero duplicate names for truly identical copies
 skills-audit audit --skills-dir "$HOME/.claude/skills" --fail-on-duplicate-names
 ```
 
 **Canonical selection heuristic:** shortest path relative to the bundle root wins. For a typical gstack layout:
 - `gstack/SKILL.md` (canonical — shortest)
-- `gstack/.agents/skills/gstack/SKILL.md` → symlink to `../../../SKILL.md`
-- `gstack/.factory/skills/gstack/SKILL.md` → symlink to `../../../SKILL.md`
+- `gstack/.agents/skills/gstack/SKILL.md` → symlink (if identical) or preserved (if different)
+- `gstack/.factory/skills/gstack/SKILL.md` → symlink (if identical) or preserved (if different)
 
 **Best practice workflow:**
 
 1. Install/update a skill pack (`./setup`, `git pull`, etc.)
 2. Run `skills-audit dedup --skills-dir <root> --apply`
 3. Run `skills-audit audit --skills-dir <root>` to verify
-4. Repeat after each pack update
+4. For multi-version variants: use platform-aware discovery profiles (see below)
+5. Repeat after each pack update
+
+## Convention-based platform inference
+
+`dedup` automatically infers target platforms from well-known directory conventions inside a bundle:
+
+| Sub-directory | Inferred platform |
+|---|---|
+| `.agents/` | `codex` |
+| `.codex/` | `codex` |
+| `.factory/` | `factory` |
+
+When a `skip_multi_version` action is reported, the output includes the inferred platform so you know which host the variant targets. This information feeds into the discovery profile routing below.
+
+## Intra-bundle routing with exclude patterns
+
+Discovery profiles now support **`exclude`** patterns per source entry. This enables routing different sub-directories of the same bundle to different platforms:
+
+```json
+{
+  "sources": [
+    {
+      "path": "~/.claude/skills/gstack",
+      "platform": ["cursor", "claude-code"],
+      "exclude": [".agents/*", ".factory/*"]
+    },
+    {
+      "path": "~/.claude/skills/gstack/.agents/skills",
+      "platform": ["codex"]
+    },
+    {
+      "path": "~/.claude/skills/gstack/.factory/skills",
+      "platform": ["factory"]
+    }
+  ]
+}
+```
+
+This means:
+- **Cursor / Claude Code** see only the primary skill files (`.agents/` and `.factory/` excluded)
+- **Codex** sees only the trimmed `.agents/skills/` variants
+- **Factory** sees only the `.factory/skills/` variants
+
+See `config/discovery-profile.gstack-multiplatform.example.json` for a ready-to-use template.
 
 ### `audit-discovery`
 

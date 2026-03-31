@@ -27,6 +27,12 @@ class SourceSpec:
 
     path: Path
     platforms: List[str]
+    # Glob patterns (relative to path) to exclude from this source's scan.
+    exclude_patterns: List[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.exclude_patterns is None:
+            self.exclude_patterns = []
 
 
 @dataclass
@@ -365,31 +371,72 @@ def print_duplicate_name_check(
 
 @dataclass
 class DedupAction:
-    """One planned symlink replacement for a duplicate SKILL.md."""
+    """One planned action for a duplicate SKILL.md."""
 
     bundle: str
     skill_name: str
     canonical_path: str
     duplicate_path: str
-    action: str  # relink | skip_not_file | dry_run
+    action: str  # relink | skip_not_file | skip_multi_version
     reason: str
+    content_hash_canonical: str = ""
+    content_hash_duplicate: str = ""
+    inferred_platform: str = ""
+
+
+# ── Convention-based platform inference (Feature B) ──────────────────────
+# Well-known sub-directory conventions inside a skill bundle that imply
+# the SKILL.md is tailored for a specific host platform.
+
+CONVENTION_PLATFORM_MAP: Dict[str, str] = {
+    ".agents": "codex",
+    ".codex": "codex",
+    ".factory": "factory",
+}
+
+
+def infer_platform_from_path(skill_md: Path, bundle_root: Path) -> str:
+    """Infer target platform from a SKILL.md path by checking known sub-directory conventions.
+
+    Returns platform label (e.g. "codex", "factory") or "" for primary/unknown.
+    """
+    try:
+        rel = skill_md.relative_to(bundle_root)
+    except ValueError:
+        return ""
+    for part in rel.parts:
+        plat = CONVENTION_PLATFORM_MAP.get(part)
+        if plat:
+            return plat
+    return ""
 
 
 def plan_dedup(
     skills_dir: Path,
 ) -> Tuple[List[DedupAction], List[DuplicateSkillNameFinding]]:
-    """Build a dedup plan: for each duplicate-name group, pick canonical and relink the rest.
+    """Build a hash-aware dedup plan (Feature C + B).
 
-    Canonical heuristic: shortest path relative to the bundle root (closest to top-level).
-    Ties broken alphabetically.
+    For each duplicate-name group:
+    - Compare content hashes of all files
+    - Same hash → safe to symlink (true duplicate)
+    - Different hash → skip_multi_version (host-specific variant), infer platform
+    Canonical heuristic: shortest path relative to bundle root.
     """
     findings = collect_duplicate_skill_names(skills_dir)
     actions: List[DedupAction] = []
     for f in findings:
         paths = [Path(p) for p in f.skill_md_paths]
-        # Pick canonical: shortest path string length, then alphabetical
         paths_sorted = sorted(paths, key=lambda p: (len(str(p)), str(p).lower()))
         canonical = paths_sorted[0]
+        try:
+            canon_hash = file_hash(canonical)
+        except OSError:
+            canon_hash = ""
+
+        bundle_root = canonical.parent
+        while bundle_root.parent != skills_dir and bundle_root.parent != bundle_root:
+            bundle_root = bundle_root.parent
+
         for dup in paths_sorted[1:]:
             if not dup.is_file():
                 actions.append(
@@ -403,16 +450,45 @@ def plan_dedup(
                     )
                 )
                 continue
-            actions.append(
-                DedupAction(
-                    bundle=f.bundle,
-                    skill_name=f.skill_name,
-                    canonical_path=str(canonical),
-                    duplicate_path=str(dup),
-                    action="relink",
-                    reason=f"replace with symlink to canonical",
+
+            try:
+                dup_hash = file_hash(dup)
+            except OSError:
+                dup_hash = ""
+
+            plat = infer_platform_from_path(dup, bundle_root)
+
+            if canon_hash and dup_hash and canon_hash == dup_hash:
+                actions.append(
+                    DedupAction(
+                        bundle=f.bundle,
+                        skill_name=f.skill_name,
+                        canonical_path=str(canonical),
+                        duplicate_path=str(dup),
+                        action="relink",
+                        reason="identical content (same hash), safe to symlink",
+                        content_hash_canonical=canon_hash[:12],
+                        content_hash_duplicate=dup_hash[:12],
+                        inferred_platform=plat,
+                    )
                 )
-            )
+            else:
+                actions.append(
+                    DedupAction(
+                        bundle=f.bundle,
+                        skill_name=f.skill_name,
+                        canonical_path=str(canonical),
+                        duplicate_path=str(dup),
+                        action="skip_multi_version",
+                        reason=(
+                            f"different content (hash mismatch), likely host-specific variant"
+                            f"{' for ' + plat if plat else ''}"
+                        ),
+                        content_hash_canonical=canon_hash[:12],
+                        content_hash_duplicate=dup_hash[:12],
+                        inferred_platform=plat,
+                    )
+                )
     return actions, findings
 
 
@@ -444,11 +520,29 @@ def print_dedup_plan(
         print(json.dumps({"actions": [], "findings": []}, indent=2))
         return
 
+    relinks = [a for a in actions if a.action == "relink"]
+    skips = [a for a in actions if a.action == "skip_multi_version"]
     print(f"findings: {len(findings)} duplicate name(s)")
-    print(f"planned actions: {len(actions)}")
-    print("\nbundle\tskill_name\taction\tduplicate_path\tcanonical_path")
+    print(f"planned: {len(relinks)} relink(s), {len(skips)} multi-version skip(s)")
+    print(
+        "\nbundle\tskill_name\taction\tinferred_platform\t"
+        "hash_canon\thash_dup\tduplicate_path\tcanonical_path"
+    )
     for a in actions:
-        print(f"{a.bundle}\t{a.skill_name}\t{a.action}\t{a.duplicate_path}\t{a.canonical_path}")
+        print(
+            f"{a.bundle}\t{a.skill_name}\t{a.action}\t{a.inferred_platform or '-'}\t"
+            f"{a.content_hash_canonical or '-'}\t{a.content_hash_duplicate or '-'}\t"
+            f"{a.duplicate_path}\t{a.canonical_path}"
+        )
+
+    if skips:
+        print("\nmulti-version variants detected (not symlinked):")
+        print("These files share a name but have different content — likely tailored for specific hosts.")
+        print("Use platform-aware discovery profiles to route each variant to its intended host.")
+        for s in skips:
+            plat_label = s.inferred_platform or "unknown"
+            print(f"  {s.duplicate_path}  (platform: {plat_label})")
+
     print("\njson:")
     print(
         json.dumps(
@@ -477,17 +571,37 @@ def is_path_excluded(path: Path, excluded_roots: List[Path]) -> bool:
     return False
 
 
+def _matches_exclude_patterns(
+    path: Path,
+    source_root: Path,
+    exclude_patterns: List[str],
+) -> bool:
+    """Check if *path* matches any of the exclude glob patterns relative to *source_root*."""
+    if not exclude_patterns:
+        return False
+    try:
+        rel = path.relative_to(source_root)
+    except ValueError:
+        return False
+    rel_str = str(rel)
+    import fnmatch
+
+    return any(fnmatch.fnmatch(rel_str, pat) for pat in exclude_patterns)
+
+
 def discover_from_source(
     source_root: Path,
     source_priority: int,
     excluded_roots: List[Path],
     source_platforms: Optional[List[str]] = None,
+    exclude_patterns: Optional[List[str]] = None,
 ) -> List[DiscoveryItem]:
     plats = (
         source_platforms
         if source_platforms is not None
         else [PLATFORM_WILDCARD]
     )
+    excl_pats = exclude_patterns or []
     items: List[DiscoveryItem] = []
     if not source_root.exists():
         return items
@@ -498,6 +612,8 @@ def discover_from_source(
     if source_root.is_dir():
         for child in sorted(source_root.iterdir(), key=lambda p: p.name.lower()):
             if is_path_excluded(child, excluded_roots):
+                continue
+            if _matches_exclude_patterns(child, source_root, excl_pats):
                 continue
             skill_md = child / "SKILL.md"
             if child.is_dir() and skill_md.exists():
@@ -517,9 +633,10 @@ def discover_from_source(
                     )
                 )
 
-    # Also scan recursively to capture nested distribution layouts.
     for skill_md in sorted(source_root.rglob("SKILL.md"), key=lambda p: str(p).lower()):
         if is_path_excluded(skill_md, excluded_roots):
+            continue
+        if _matches_exclude_patterns(skill_md, source_root, excl_pats):
             continue
         skill_root = skill_md.parent
         root_key = str(skill_root.resolve())
@@ -602,7 +719,13 @@ def infer_default_platforms_for_source(root: Path) -> List[str]:
 
 
 def parse_profile_source_entries(sources_raw: object) -> List[SourceSpec]:
-    """Parse profile `sources`: string or { path, platform: [...] } per entry."""
+    """Parse profile ``sources``: string or object per entry.
+
+    Object form supports:
+      - ``path`` (required): root directory
+      - ``platform`` (required): list of platform labels
+      - ``exclude`` (optional): list of glob patterns relative to *path* to skip
+    """
     if not isinstance(sources_raw, list):
         raise ValueError("'sources' must be a list.")
     specs: List[SourceSpec] = []
@@ -613,6 +736,7 @@ def parse_profile_source_entries(sources_raw: object) -> List[SourceSpec]:
         if isinstance(item, dict):
             path_v = item.get("path")
             plat_v = item.get("platform")
+            excl_v = item.get("exclude", [])
             if not isinstance(path_v, str):
                 raise ValueError(
                     f"sources[{idx}]: object entry requires string 'path'."
@@ -625,7 +749,17 @@ def parse_profile_source_entries(sources_raw: object) -> List[SourceSpec]:
                 raise ValueError(
                     f"sources[{idx}]: 'platform' must be a list of strings."
                 )
-            specs.append(SourceSpec(Path(path_v).expanduser(), list(plat_v)))
+            if not isinstance(excl_v, list) or not all(isinstance(x, str) for x in excl_v):
+                raise ValueError(
+                    f"sources[{idx}]: 'exclude' must be a list of strings."
+                )
+            specs.append(
+                SourceSpec(
+                    Path(path_v).expanduser(),
+                    list(plat_v),
+                    exclude_patterns=list(excl_v),
+                )
+            )
             continue
         raise ValueError(
             f"sources[{idx}]: each entry must be a string or object with path + platform."
@@ -1268,7 +1402,8 @@ def main() -> int:
         for idx, spec in enumerate(source_specs):
             all_items.extend(
                 discover_from_source(
-                    spec.path, idx, excluded_sources, spec.platforms
+                    spec.path, idx, excluded_sources, spec.platforms,
+                    exclude_patterns=spec.exclude_patterns,
                 )
             )
 
