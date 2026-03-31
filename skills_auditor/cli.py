@@ -385,8 +385,6 @@ class DedupAction:
 
 
 # ── Convention-based platform inference (Feature B) ──────────────────────
-# Well-known sub-directory conventions inside a skill bundle that imply
-# the SKILL.md is tailored for a specific host platform.
 
 CONVENTION_PLATFORM_MAP: Dict[str, str] = {
     ".agents": "codex",
@@ -411,19 +409,339 @@ def infer_platform_from_path(skill_md: Path, bundle_root: Path) -> str:
     return ""
 
 
+# ── Select-One Routing Pipeline ─────────────────────────────────────────
+# Four phases: discover → classify → route → resolve
+# Each phase produces StateTransition records for the run trace.
+
+from skills_auditor.state_machine import (
+    ClassifySignal,
+    RunTrace,
+    SkillIdentityTrace,
+    StateTransition,
+    VariantState,
+    write_trace,
+)
+
+
+def _bundle_root_for(skill_md: Path, skills_dir: Path) -> Path:
+    """Walk up from the SKILL.md parent to find the top-level bundle dir."""
+    cur = skill_md.parent
+    while cur.parent != skills_dir and cur.parent != cur:
+        cur = cur.parent
+    return cur
+
+
+def route_pipeline(
+    skills_dir: Path,
+    active_platform: str,
+    resolve_strategy: str = "archive",
+    trace_dir: Optional[Path] = None,
+) -> Tuple[RunTrace, List[DedupAction]]:
+    """Full Select-One Routing pipeline with trace output.
+
+    Returns (trace, actions) where actions are backward-compatible DedupAction
+    objects for apply_dedup / apply_route.
+    """
+    trace = RunTrace(
+        skills_dir=str(skills_dir),
+        active_platform=active_platform,
+        resolve_strategy=resolve_strategy,
+    )
+    actions: List[DedupAction] = []
+
+    findings = collect_duplicate_skill_names(skills_dir)
+    if not findings:
+        write_trace(trace, trace_dir)
+        return trace, actions
+
+    for f in findings:
+        ident = SkillIdentityTrace(
+            skill_name=f.skill_name,
+            bundle=f.bundle,
+            active_platform=active_platform,
+            variants=list(f.skill_md_paths),
+        )
+
+        paths = [Path(p) for p in f.skill_md_paths]
+        paths_sorted = sorted(paths, key=lambda p: (len(str(p)), str(p).lower()))
+        primary = paths_sorted[0]
+        bundle_root = _bundle_root_for(primary, skills_dir)
+
+        # ── Phase 1: Discover — compute hashes ──
+        hashes: Dict[str, str] = {}
+        for p in paths_sorted:
+            try:
+                hashes[str(p)] = file_hash(p) if p.is_file() else ""
+            except OSError:
+                hashes[str(p)] = ""
+
+        primary_hash = hashes.get(str(primary), "")
+
+        # ── Phase 2: Classify — determine each variant's state & platform ──
+        variant_platforms: Dict[str, str] = {}  # path → platform
+        all_same_hash = all(
+            h == primary_hash and h for h in hashes.values()
+        )
+
+        for p in paths_sorted:
+            p_str = str(p)
+            h = hashes.get(p_str, "")
+
+            if all_same_hash:
+                # TRUE_DUPLICATE path
+                ident.add_transition(StateTransition.create(
+                    p_str, VariantState.DISCOVERED, VariantState.TRUE_DUPLICATE,
+                    reason="all variants have identical hash",
+                    content_hash=h[:12],
+                ))
+                # True duplicates: primary gets selected, rest superseded
+                plat = infer_platform_from_path(p, bundle_root)
+                variant_platforms[p_str] = plat or PLATFORM_WILDCARD
+            else:
+                # VARIANT_DETECTED path
+                ident.add_transition(StateTransition.create(
+                    p_str, VariantState.DISCOVERED, VariantState.VARIANT_DETECTED,
+                    reason=f"hash {'matches' if h == primary_hash else 'differs from'} primary",
+                    content_hash=h[:12],
+                ))
+
+                plat = infer_platform_from_path(p, bundle_root)
+                if plat:
+                    signal = ClassifySignal.PATH_CONVENTION
+                elif p == primary:
+                    plat = PLATFORM_WILDCARD
+                    signal = ClassifySignal.POSITION_FALLBACK
+                else:
+                    signal = ClassifySignal.CONTENT_FEATURE
+                    plat = ""
+
+                if plat:
+                    ident.add_transition(StateTransition.create(
+                        p_str, VariantState.VARIANT_DETECTED, VariantState.CLASSIFIED,
+                        signal=signal,
+                        reason=f"platform inferred as '{plat}'",
+                        inferred_platform=plat,
+                    ))
+                    variant_platforms[p_str] = plat
+                else:
+                    ident.add_transition(StateTransition.create(
+                        p_str, VariantState.VARIANT_DETECTED, VariantState.UNROUTABLE,
+                        reason="no convention match, no explicit config",
+                    ))
+                    ident.add_transition(StateTransition.create(
+                        p_str, VariantState.UNROUTABLE, VariantState.FLAGGED,
+                        reason="manual classification required",
+                    ))
+
+        # ── Phase 3: Route — select one per platform ──
+        # Priority: exact platform match > wildcard. Scan for exact first.
+        routable = [
+            (str(p), variant_platforms.get(str(p)))
+            for p in paths_sorted
+            if variant_platforms.get(str(p)) is not None
+        ]
+        exact_match = next(
+            (ps for ps, plat in routable if plat == active_platform),
+            None,
+        )
+
+        for p_str, plat in routable:
+            prev_state = (
+                VariantState.TRUE_DUPLICATE if all_same_hash
+                else VariantState.CLASSIFIED
+            )
+
+            if exact_match:
+                is_selected = (p_str == exact_match)
+            elif all_same_hash:
+                is_selected = (p_str == str(primary))
+            else:
+                # No exact match — wildcard primary is fallback
+                is_selected = (plat == PLATFORM_WILDCARD)
+
+            if is_selected and ident.final_selected is None:
+                ident.add_transition(StateTransition.create(
+                    p_str, prev_state, VariantState.SELECTED,
+                    reason=(
+                        f"exact match: platform '{plat}' == active '{active_platform}'"
+                        if exact_match and not all_same_hash
+                        else "primary selected (true duplicate)" if all_same_hash
+                        else f"wildcard fallback: no exact match for '{active_platform}'"
+                    ),
+                ))
+                ident.final_selected = p_str
+            else:
+                ident.add_transition(StateTransition.create(
+                    p_str, prev_state, VariantState.SUPERSEDED,
+                    reason=(
+                        f"platform '{plat}' superseded by exact match"
+                        if exact_match and not all_same_hash
+                        else "non-primary true duplicate" if all_same_hash
+                        else f"platform '{plat}' not active"
+                    ),
+                    inferred_platform=plat,
+                ))
+                ident.final_superseded.append(p_str)
+
+        # If no variant was selected (e.g. all are for other platforms),
+        # fallback: select primary
+        if ident.final_selected is None and paths_sorted:
+            p_str = str(primary)
+            plat = variant_platforms.get(p_str, PLATFORM_WILDCARD)
+            # Undo the SUPERSEDED if primary was superseded
+            ident.final_selected = p_str
+            ident.add_transition(StateTransition.create(
+                p_str, VariantState.SUPERSEDED, VariantState.SELECTED,
+                reason="fallback: no platform-specific variant matched, using primary",
+            ))
+            if p_str in ident.final_superseded:
+                ident.final_superseded.remove(p_str)
+
+        # ── Phase 4: Resolve — terminal states + build actions ──
+        if ident.final_selected:
+            ident.add_transition(StateTransition.create(
+                ident.final_selected, VariantState.SELECTED, VariantState.ACTIVE,
+                reason="retained as active",
+            ))
+
+        for sup in ident.final_superseded:
+            sup_hash = hashes.get(sup, "")
+            sup_plat = variant_platforms.get(sup, "")
+            primary_hash_short = primary_hash[:12] if primary_hash else ""
+            sup_hash_short = sup_hash[:12] if sup_hash else ""
+
+            if all_same_hash:
+                # True duplicate → relink
+                terminal = VariantState.ARCHIVED
+                action = "relink"
+                reason = "identical content, replace with symlink"
+            elif resolve_strategy == "delete":
+                terminal = VariantState.DELETED
+                action = "delete"
+                reason = f"platform '{sup_plat}' not active, strategy=delete"
+            elif resolve_strategy == "archive":
+                terminal = VariantState.ARCHIVED
+                action = "archive"
+                reason = f"platform '{sup_plat}' not active, strategy=archive"
+            else:
+                terminal = VariantState.KEPT_HIDDEN
+                action = "keep"
+                reason = f"platform '{sup_plat}' not active, strategy=keep"
+
+            ident.add_transition(StateTransition.create(
+                sup, VariantState.SUPERSEDED, terminal,
+                reason=reason,
+                inferred_platform=sup_plat,
+            ))
+
+            actions.append(DedupAction(
+                bundle=f.bundle,
+                skill_name=f.skill_name,
+                canonical_path=ident.final_selected or str(primary),
+                duplicate_path=sup,
+                action=action,
+                reason=reason,
+                content_hash_canonical=primary_hash_short,
+                content_hash_duplicate=sup_hash_short,
+                inferred_platform=sup_plat,
+            ))
+
+        trace.identities.append(ident)
+
+    write_trace(trace, trace_dir)
+    return trace, actions
+
+
+def apply_route(actions: List[DedupAction], skills_dir: Path) -> int:
+    """Execute route actions. Returns count of applied changes."""
+    applied = 0
+    for a in actions:
+        dup = Path(a.duplicate_path)
+        canonical = Path(a.canonical_path)
+
+        if a.action == "relink":
+            rel = os.path.relpath(canonical, dup.parent)
+            dup.unlink()
+            dup.symlink_to(rel)
+            applied += 1
+        elif a.action == "archive":
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            archive_name = f"{dup.name}.archived-{ts}"
+            dup.rename(dup.parent / archive_name)
+            applied += 1
+        elif a.action == "delete":
+            if dup.is_file() or dup.is_symlink():
+                dup.unlink()
+            elif dup.is_dir():
+                import shutil
+                shutil.rmtree(dup)
+            applied += 1
+        # "keep" → no filesystem change
+    return applied
+
+
+def print_route_plan(
+    trace: RunTrace,
+    actions: List[DedupAction],
+    apply: bool,
+) -> None:
+    mode = "APPLY" if apply else "DRY-RUN"
+    print(f"route mode: {mode}")
+    print(f"active platform: {trace.active_platform}")
+    print(f"resolve strategy: {trace.resolve_strategy}")
+
+    if not trace.identities:
+        print("status: ok (no duplicate names found, no routing needed)")
+        return
+
+    relinks = [a for a in actions if a.action == "relink"]
+    archives = [a for a in actions if a.action == "archive"]
+    deletes = [a for a in actions if a.action == "delete"]
+    keeps = [a for a in actions if a.action == "keep"]
+    print(
+        f"identities: {len(trace.identities)} | "
+        f"relink: {len(relinks)} | archive: {len(archives)} | "
+        f"delete: {len(deletes)} | keep: {len(keeps)}"
+    )
+
+    for ident in trace.identities:
+        print(f"\n  [{ident.bundle}] {ident.skill_name}")
+        print(f"    selected: {ident.final_selected or '(none)'}")
+        for sup in ident.final_superseded:
+            plat = ""
+            for t in ident.transitions:
+                if t.variant_path == sup and t.inferred_platform:
+                    plat = t.inferred_platform
+            act = next((a for a in actions if a.duplicate_path == sup), None)
+            act_label = act.action if act else "?"
+            print(f"    superseded: {sup}  (platform: {plat or '?'}, action: {act_label})")
+
+    flagged = [
+        t for ident in trace.identities for t in ident.transitions
+        if t.to_state == VariantState.FLAGGED.value
+    ]
+    if flagged:
+        print(f"\nFLAGGED (unroutable, needs manual classification): {len(flagged)}")
+        for t in flagged:
+            print(f"  {t.variant_path}: {t.reason}")
+
+    print(f"\ntrace written: {trace.run_id}")
+
+
+# ── Legacy plan_dedup (backward compat, delegates to route_pipeline) ─────
+
 def plan_dedup(
     skills_dir: Path,
 ) -> Tuple[List[DedupAction], List[DuplicateSkillNameFinding]]:
-    """Build a hash-aware dedup plan (Feature C + B).
+    """Build a dedup plan. Backward-compatible wrapper around route_pipeline.
 
-    For each duplicate-name group:
-    - Compare content hashes of all files
-    - Same hash → safe to symlink (true duplicate)
-    - Different hash → skip_multi_version (host-specific variant), infer platform
-    Canonical heuristic: shortest path relative to bundle root.
+    When called without --platform, uses '*' (wildcard) which means:
+    - TRUE_DUPLICATE → relink (same behavior as before)
+    - VARIANT_DETECTED → skip_multi_version (same behavior as before)
     """
     findings = collect_duplicate_skill_names(skills_dir)
     actions: List[DedupAction] = []
+
     for f in findings:
         paths = [Path(p) for p in f.skill_md_paths]
         paths_sorted = sorted(paths, key=lambda p: (len(str(p)), str(p).lower()))
@@ -433,18 +751,14 @@ def plan_dedup(
         except OSError:
             canon_hash = ""
 
-        bundle_root = canonical.parent
-        while bundle_root.parent != skills_dir and bundle_root.parent != bundle_root:
-            bundle_root = bundle_root.parent
+        bundle_root = _bundle_root_for(canonical, skills_dir)
 
         for dup in paths_sorted[1:]:
             if not dup.is_file():
                 actions.append(
                     DedupAction(
-                        bundle=f.bundle,
-                        skill_name=f.skill_name,
-                        canonical_path=str(canonical),
-                        duplicate_path=str(dup),
+                        bundle=f.bundle, skill_name=f.skill_name,
+                        canonical_path=str(canonical), duplicate_path=str(dup),
                         action="skip_not_file",
                         reason="duplicate path is not a regular file",
                     )
@@ -459,36 +773,28 @@ def plan_dedup(
             plat = infer_platform_from_path(dup, bundle_root)
 
             if canon_hash and dup_hash and canon_hash == dup_hash:
-                actions.append(
-                    DedupAction(
-                        bundle=f.bundle,
-                        skill_name=f.skill_name,
-                        canonical_path=str(canonical),
-                        duplicate_path=str(dup),
-                        action="relink",
-                        reason="identical content (same hash), safe to symlink",
-                        content_hash_canonical=canon_hash[:12],
-                        content_hash_duplicate=dup_hash[:12],
-                        inferred_platform=plat,
-                    )
-                )
+                actions.append(DedupAction(
+                    bundle=f.bundle, skill_name=f.skill_name,
+                    canonical_path=str(canonical), duplicate_path=str(dup),
+                    action="relink",
+                    reason="identical content (same hash), safe to symlink",
+                    content_hash_canonical=canon_hash[:12],
+                    content_hash_duplicate=dup_hash[:12],
+                    inferred_platform=plat,
+                ))
             else:
-                actions.append(
-                    DedupAction(
-                        bundle=f.bundle,
-                        skill_name=f.skill_name,
-                        canonical_path=str(canonical),
-                        duplicate_path=str(dup),
-                        action="skip_multi_version",
-                        reason=(
-                            f"different content (hash mismatch), likely host-specific variant"
-                            f"{' for ' + plat if plat else ''}"
-                        ),
-                        content_hash_canonical=canon_hash[:12],
-                        content_hash_duplicate=dup_hash[:12],
-                        inferred_platform=plat,
-                    )
-                )
+                actions.append(DedupAction(
+                    bundle=f.bundle, skill_name=f.skill_name,
+                    canonical_path=str(canonical), duplicate_path=str(dup),
+                    action="skip_multi_version",
+                    reason=(
+                        f"different content (hash mismatch), likely host-specific variant"
+                        f"{' for ' + plat if plat else ''}"
+                    ),
+                    content_hash_canonical=canon_hash[:12],
+                    content_hash_duplicate=dup_hash[:12],
+                    inferred_platform=plat,
+                ))
     return actions, findings
 
 
@@ -538,7 +844,7 @@ def print_dedup_plan(
     if skips:
         print("\nmulti-version variants detected (not symlinked):")
         print("These files share a name but have different content — likely tailored for specific hosts.")
-        print("Use platform-aware discovery profiles to route each variant to its intended host.")
+        print("Use 'skills-audit route --platform <name>' for Select-One routing.")
         for s in skips:
             plat_label = s.inferred_platform or "unknown"
             print(f"  {s.duplicate_path}  (platform: {plat_label})")
@@ -1240,6 +1546,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Actually replace duplicates with symlinks (default is dry-run).",
     )
 
+    # ── route: Select-One Routing with state machine trace ──
+    p_route = sub.add_parser(
+        "route",
+        help="Select-One Routing: classify variants by platform, keep one, resolve rest",
+    )
+    p_route.add_argument(
+        "--skills-dir", action="append", dest="skills_dirs", metavar="DIR",
+        help="Skill root (repeat for multiple). Default: ~/.cursor/skills",
+    )
+    p_route.add_argument(
+        "--platform", required=True,
+        help="Active platform (e.g. cursor, codex, factory, claude-code).",
+    )
+    p_route.add_argument(
+        "--strategy", default="archive", choices=["archive", "delete", "keep"],
+        help="How to resolve superseded variants (default: archive).",
+    )
+    p_route.add_argument(
+        "--apply", action="store_true",
+        help="Execute the routing plan (default is dry-run).",
+    )
+    p_route.add_argument(
+        "--trace-dir", metavar="DIR",
+        help="Override trace output directory (default: ~/.skills-auditor/traces/).",
+    )
+
+    # ── audit-state-machine: validate accumulated traces ──
+    p_sm = sub.add_parser(
+        "audit-state-machine",
+        help="Validate accumulated run traces against state machine transition rules",
+    )
+    p_sm.add_argument(
+        "--trace-dir", metavar="DIR",
+        help="Trace directory to audit (default: ~/.skills-auditor/traces/).",
+    )
+
     p_discovery = sub.add_parser(
         "audit-discovery",
         help="Audit discovery-layer collisions and canonical skill selection",
@@ -1367,6 +1709,55 @@ def main() -> int:
                 applied = apply_dedup(actions)
                 print(f"\nApplied: {applied} symlink(s). Re-run audit to verify.")
         return 0
+
+    if args.command == "route":
+        td = Path(args.trace_dir).expanduser() if args.trace_dir else None
+        for idx, skills_dir in enumerate(resolve_skills_dirs(args.skills_dirs)):
+            if idx > 0:
+                print()
+            print(f"skills-dir: {skills_dir}")
+            trace, actions = route_pipeline(
+                skills_dir,
+                active_platform=args.platform,
+                resolve_strategy=args.strategy,
+                trace_dir=td,
+            )
+            print_route_plan(trace, actions, args.apply)
+            if args.apply and actions:
+                applied = apply_route(actions, skills_dir)
+                print(f"\nApplied: {applied} action(s). Re-run audit to verify.")
+        return 0
+
+    if args.command == "audit-state-machine":
+        from skills_auditor.state_machine import audit_traces, load_traces as _load_traces
+        td = Path(args.trace_dir).expanduser() if args.trace_dir else None
+        traces = _load_traces(td)
+        if not traces:
+            print("No traces found. Run 'route' first to generate trace data.")
+            return 0
+        findings = audit_traces(traces)
+        print(f"traces analyzed: {len(traces)}")
+        print(f"findings: {len(findings)}")
+        errors = [f for f in findings if f.severity == "error"]
+        warnings = [f for f in findings if f.severity == "warning"]
+        infos = [f for f in findings if f.severity == "info"]
+        print(f"  errors: {len(errors)}, warnings: {len(warnings)}, info: {len(infos)}")
+        for f in findings:
+            prefix = {"error": "ERR", "warning": "WARN", "info": "INFO"}.get(f.severity, "?")
+            parts = [f"[{prefix}] {f.check}: {f.detail}"]
+            if f.run_id:
+                parts.append(f"run={f.run_id}")
+            if f.skill_name:
+                parts.append(f"skill={f.skill_name}")
+            if f.variant_path:
+                parts.append(f"path={f.variant_path}")
+            print("  " + "  ".join(parts))
+        print("\njson:")
+        print(json.dumps(
+            [asdict(f) for f in findings],
+            indent=2, ensure_ascii=False,
+        ))
+        return 1 if errors else 0
 
     if args.command == "audit-discovery":
         profile: Dict[str, object] = {}
