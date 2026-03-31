@@ -21,6 +21,7 @@ description: Audit and synchronize local skill directories by detecting broken l
 5. Run sync in dry-run mode and review planned actions. For cross-agent installs, use `--discovery-profile` and `--target-platform` (see repo README).
 6. Run sync with `--apply` only after approval.
 7. Re-run `audit --with-drift` to verify final state.
+8. **`audit` runs a duplicate-name check by default** (same `name:` in multiple nested `SKILL.md` under one bundle — e.g. gstack `.agents` copies). Use `--skip-duplicate-name-check` to turn off; `--fail-on-duplicate-names` for CI exit code 4.
 
 ## Commands
 

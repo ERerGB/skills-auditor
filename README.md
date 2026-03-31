@@ -132,8 +132,11 @@ Rules:
 
 Inspect the current skill root and print a table + JSON summary.
 
+After the main table, **`audit` always runs a duplicate `name:` check** (unless `--skip-duplicate-name-check`): for each top-level bundle folder under the skills root, it scans nested `SKILL.md` files and reports when the same frontmatter `name:` appears more than once (common with gstack’s `.agents` / `.factory` copies — can surface as multiple `/gstack` in an IDE). Use `--fail-on-duplicate-names` to exit with code **4** when any bundle has duplicates (for CI).
+
 ```bash
 skills-audit audit --skills-dir "$HOME/.cursor/skills"
+skills-audit audit --skills-dir "$HOME/.claude/skills" --fail-on-duplicate-names
 ```
 
 ### `sync`

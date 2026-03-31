@@ -237,6 +237,117 @@ def parse_skill_name(skill_md: Path) -> str:
     return skill_md.parent.name
 
 
+# When scanning a skill pack for duplicate frontmatter names, skip these path segments.
+_IGNORE_SKILL_SCAN_SEGMENTS = frozenset(
+    {
+        ".git",
+        "node_modules",
+        "dist",
+        ".cache",
+        "__pycache__",
+        ".venv",
+        "venv",
+        ".tox",
+    }
+)
+
+
+def _skill_md_path_is_under_ignored_segment(skill_md: Path) -> bool:
+    return any(part in _IGNORE_SKILL_SCAN_SEGMENTS for part in skill_md.parts)
+
+
+@dataclass
+class DuplicateSkillNameFinding:
+    """Same frontmatter `name:` declared by more than one SKILL.md under one bundle."""
+
+    bundle: str
+    skill_name: str
+    skill_md_paths: List[str]
+
+
+def collect_duplicate_skill_names(skills_dir: Path) -> List[DuplicateSkillNameFinding]:
+    """Per immediate child of skills_dir (bundle), find duplicate `name:` values in nested SKILL.md files.
+
+    Catches packs like gstack that ship `.agents/skills/gstack/SKILL.md` alongside `gstack/SKILL.md`,
+    which can confuse hosts that index recursively (multiple `/gstack` in the Skill list).
+    """
+    findings: List[DuplicateSkillNameFinding] = []
+    if not skills_dir.exists() or not skills_dir.is_dir():
+        return findings
+
+    for entry in sorted(skills_dir.iterdir(), key=lambda p: p.name.lower()):
+        if entry.name.startswith("."):
+            continue
+        if entry.is_file() and not entry.is_symlink():
+            continue
+        try:
+            root = entry.resolve()
+        except OSError:
+            continue
+        if not root.is_dir():
+            continue
+
+        by_name: Dict[str, List[Path]] = {}
+        try:
+            for skill_md in root.rglob("SKILL.md"):
+                if _skill_md_path_is_under_ignored_segment(skill_md):
+                    continue
+                try:
+                    name = parse_skill_name(skill_md)
+                except OSError:
+                    continue
+                by_name.setdefault(name, []).append(skill_md)
+        except OSError:
+            continue
+
+        for skill_name in sorted(by_name.keys()):
+            paths = sorted(by_name[skill_name], key=lambda p: str(p).lower())
+            if len(paths) > 1:
+                findings.append(
+                    DuplicateSkillNameFinding(
+                        bundle=entry.name,
+                        skill_name=skill_name,
+                        skill_md_paths=[str(p) for p in paths],
+                    )
+                )
+    return findings
+
+
+def print_duplicate_name_check(
+    skills_dir: Path,
+    findings: List[DuplicateSkillNameFinding],
+) -> None:
+    print("\nduplicate frontmatter name: check (per top-level bundle)")
+    print(
+        "Detects multiple SKILL.md files declaring the same `name:` under one install folder "
+        "(e.g. gstack + .agents copy)."
+    )
+    if not findings:
+        print("status: ok (no duplicate names within any bundle)")
+        print("\njson:")
+        print(json.dumps({"skills_dir": str(skills_dir), "findings": []}, indent=2))
+        return
+
+    print("status: findings present")
+    print("bundle\tskill_name\tcount\tpaths")
+    for f in findings:
+        joined = " | ".join(f.skill_md_paths)
+        print(
+            f"{f.bundle}\t{f.skill_name}\t{len(f.skill_md_paths)}\t{joined}"
+        )
+    print("\njson:")
+    print(
+        json.dumps(
+            {
+                "skills_dir": str(skills_dir),
+                "findings": [asdict(f) for f in findings],
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+
+
 def file_hash(path: Path) -> str:
     data = path.read_bytes()
     return hashlib.sha256(data).hexdigest()
@@ -820,6 +931,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--with-drift", action="store_true",
         help="Include git drift check for symlinked skills (fetches remote).",
     )
+    p_audit.add_argument(
+        "--skip-duplicate-name-check",
+        action="store_true",
+        help="Skip the default scan for duplicate `name:` in nested SKILL.md under each bundle.",
+    )
+    p_audit.add_argument(
+        "--fail-on-duplicate-names",
+        action="store_true",
+        help="Exit with code 4 if any bundle has multiple SKILL.md declaring the same name.",
+    )
 
     p_drift = sub.add_parser("drift-check", help="Check git sync status for symlinked skills")
     p_drift.add_argument(
@@ -903,6 +1024,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command == "audit":
+        duplicate_exit = False
         for idx, skills_dir in enumerate(resolve_skills_dirs(args.skills_dirs)):
             if idx > 0:
                 print()
@@ -915,6 +1037,13 @@ def main() -> int:
                     if s.entry_type == "symlink" and s.link_status == "ok" and s.resolved_target:
                         drift_map[s.name] = check_drift_for_path(s.name, Path(s.resolved_target))
             print_audit(statuses, drift_map)
+            if not args.skip_duplicate_name_check:
+                dup_findings = collect_duplicate_skill_names(skills_dir)
+                print_duplicate_name_check(skills_dir, dup_findings)
+                if dup_findings:
+                    duplicate_exit = True
+        if args.fail_on_duplicate_names and duplicate_exit:
+            return 4
         return 0
 
     if args.command == "drift-check":
