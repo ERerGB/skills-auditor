@@ -1,6 +1,11 @@
 ---
 name: skills-auditor
-description: Audit and synchronize local skill directories by detecting broken links, drifted local copies, and ref mismatches, then applying safe relink operations from a mapping file. Use when user asks to clean, organize, or sync skill folders.
+description: >
+  Audit and synchronize local skill directories by detecting broken links, drifted copies,
+  and ref mismatches, then dedup, platform routing, and optional sync from a mapping file.
+  Default engagement is a multi-cycle pipeline (audit → dedup → route → trace validation);
+  use explicit subcommands or flags only when the user scopes to a single step. Triggers:
+  skills audit, dedup, route, drift, discovery profile, multi-platform skill packs.
 ---
 
 # Skills Auditor
@@ -32,17 +37,26 @@ section in the project README.
 
 ## Workflow
 
-1. Run filesystem audit first (`audit`).
-2. Run drift check (`drift-check`) to verify local-remote sync.
-3. Run discovery-layer audit (`audit-discovery`) to detect collisions.
-4. **Dedup bundles with mirror copies** (`dedup --apply`) — replaces duplicate SKILL.md files with symlinks to the canonical (shortest-path) file. Best practice after installing or updating skill packs.
-5. **Select-One Routing** (`route --platform <name>`) — for multi-platform skill packs, classifies each variant by platform convention, selects one per identity, resolves the rest (archive / delete / keep). Writes a structured trace to `~/.skills-auditor/traces/`.
-6. **Audit state machine** (`audit-state-machine`) — validates accumulated traces against transition rules (illegal transitions, terminal coverage, dead paths, signal gaps, cross-run consistency).
-7. If user wants canonical sync, prepare a JSON mapping file.
-8. Run sync in dry-run mode and review planned actions. For cross-agent installs, use `--discovery-profile` and `--target-platform` (see repo README).
-9. Run sync with `--apply` only after approval.
-10. Re-run `audit --with-drift` to verify final state.
-11. **`audit` runs a duplicate-name check by default** (same `name:` on more than one **resolved** `SKILL.md` under one bundle; symlinks to the same file count once). Use `--skip-duplicate-name-check` to turn off; `--fail-on-duplicate-names` for CI exit code 4.
+### Default full pipeline (cycles)
+
+When the user asks for a **full** skills-auditor pass and does **not** narrow scope to one subcommand, run **sequential cycles**. Treat **`audit`**, **`dedup`**, and **`route`** as **separate cycles** in the same pipeline—not optional extras. Each mutating cycle should follow **dry-run → review → `--apply` only after approval** (dedup, route, sync).
+
+| Cycle | Commands | Role |
+|-------|----------|------|
+| **1 — Discover** | `audit` (add `--with-drift` when remote truth matters); optional `drift-check`; optional `audit-discovery` when a discovery profile applies | Filesystem + link health, duplicate `name:` check, drift, collision map |
+| **2 — Dedup** | `dedup` (dry-run), then `dedup --apply` if the plan is acceptable | Hash-aware fold of mirror `SKILL.md` copies to a canonical path |
+| **3 — Route** | `route --platform <name>` (dry-run), then `route … --apply` after approval | Select-one per identity for multi-platform packs; writes traces under `~/.skills-auditor/traces/` |
+| **4 — Trace QA** | `audit-state-machine` (optional `--trace-dir`) | Validate traces (illegal transitions, coverage, consistency) |
+| **5 — Canonical sync** (optional) | Build `--map-file` → `sync` dry-run → `sync --apply` | Explicit relink to remotes; orthogonal to dedup/route |
+| **6 — Close** | `audit --with-drift` | Confirm end state |
+
+**Duplicate `name:` check**: `audit` runs it **by default** (same `name:` on more than one **resolved** `SKILL.md` under one bundle; symlinks to the same file count once). Use `--skip-duplicate-name-check` or `--fail-on-duplicate-names` only when the user specifies CI-style gating.
+
+### Partial / scoped runs
+
+If the user **explicitly** requests a **single** leg (e.g. “audit only”, “dedup dry-run on this dir”, “route Codex for `~/.claude/skills`”), **run only that cycle** with their **stated flags and paths**. Do not assume other cycles already ran.
+
+For cross-agent installs, use `--discovery-profile` and `--target-platform` as documented in the repo README when the user names them.
 
 ## Commands
 
