@@ -2,6 +2,8 @@
 
 One-command audit and sync for local AI skill folders (Cursor, OpenClaw, etc.).
 
+**Cursor / agent skill pack:** root [`SKILL.md`](SKILL.md) is the **top entry** (default full pipeline with **`--apply`** on dedup/route/sync unless the operator asks for dry-run or sets `SKILLS_AUDITOR_DRY_RUN=1`); layered sub-skills live under [`skills/`](skills/README.md). Optional env: [`config/skills-auditor.pipeline.example.env`](config/skills-auditor.pipeline.example.env).
+
 ## Why this exists
 
 Skill folders tend to drift over time:
@@ -28,7 +30,7 @@ This repo provides a safe workflow:
 - Sync selected skills to canonical sources via mapping file
 - **Optional `--target-platform` + `--discovery-profile`** on `sync` to skip skills whose canonical path lives under a source that does not allow that platform
 - Safe replacement: existing directories are archived before relinking
-- Default dry-run behavior
+- CLI default dry-run until `--apply`; Cursor top skill [`SKILL.md`](SKILL.md) defaults to apply unless dry-run
 
 ## Install
 

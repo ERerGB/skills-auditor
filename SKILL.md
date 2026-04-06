@@ -1,196 +1,140 @@
 ---
 name: skills-auditor
 description: >
-  Audit and synchronize local skill directories by detecting broken links, drifted copies,
-  and ref mismatches, then dedup, platform routing, and optional sync from a mapping file.
-  Default engagement is a multi-cycle pipeline (audit → dedup → route → trace validation);
-  use explicit subcommands or flags only when the user scopes to a single step. Triggers:
-  skills audit, dedup, route, drift, discovery profile, multi-platform skill packs.
+  Top entry for the Skills Auditor skill system: DEFAULT full pipeline applies filesystem changes
+  (dedup/route/sync use --apply) unless the operator explicitly asks for dry-run or sets
+  SKILLS_AUDITOR_DRY_RUN=1. Sub-skills under skills/. Triggers: /skills-auditor, skills audit, dedup,
+  route, drift, discovery profile.
 ---
 
-# Skills Auditor
+# Skills Auditor (top)
 
-## When to Use
+## Default behavior (full pipeline + apply)
 
-- User asks to audit one or more local skill directories in their current environment.
-- User asks to detect broken skill links.
-- User asks to sync local skills to canonical repositories.
-- User wants one-click cleanup with dry-run safety.
-- User has multi-platform skill packs (Cursor + Codex + Claude Code) and wants Select-One Routing.
+When the user invokes **`/skills-auditor`** or this skill **without** asking to stay read-only:
 
-## Isolation: Run as Subagent
+1. Load optional config: if `SKILLS_AUDITOR_CONFIG` points to an env file, `source` it.
+2. If **`SKILLS_AUDITOR_MODE`** is unset or `full`, run **all** cycles in order. For **`dedup`**, **`route`**, and **`sync`**, pass **`--apply`** by default (mutating steps actually change disk).
+3. **Dry-run exception:** if the user **explicitly** asks for dry-run (e.g. “dry run”, “只预览”, “不要 apply”, “plan only”) **or** **`SKILLS_AUDITOR_DRY_RUN=1`**, then **omit** `--apply` on those commands.
+4. If **`SKILLS_AUDITOR_MODE`** is a single cycle name, run **only** that cycle (same apply vs dry-run rules).
 
-Each audit or route run should produce **reproducible, context-free results**.
-To avoid session context bleeding between runs, invoke `skills-audit` from
-an **isolated subagent** whenever the runtime supports it.
+**Narrowing without env files:** “audit only” → discover only (never mutating). “dedup dry-run” → dedup without `--apply`. “route Codex” with no dry-run wording → route **with** `--apply` for that run.
 
-> **Principle**: Trace data is fact. Interpretation is inference. Keep them
-> separated by running the fact-collection phase in a zero-context subagent.
+## Configuration (optional)
 
-**Minimum viable isolation**: use your IDE's native subagent/Task mechanism
-with `readonly: true` (Cursor `Task` tool, Claude Code `--allowedTools`).
+Template: [`config/skills-auditor.pipeline.example.env`](config/skills-auditor.pipeline.example.env).
 
-For dedicated harness options (SSOT compilation, git-worktree parallelism,
-role-based delegation), see the
-[Isolation Harness Recommendations](https://github.com/ERerGB/skills-auditor#isolation-harness-recommendations)
-section in the project README.
+| Variable | Purpose |
+| --- | --- |
+| `SKILLS_AUDITOR_ROOTS` | Space-separated skill roots → expand to repeated `--skills-dir` |
+| `SKILLS_AUDITOR_EXTRA_ROOTS` | Optional extra roots appended to the list |
+| `SKILLS_AUDITOR_WITH_DRIFT` | `1` → add `--with-drift` on discover + close audits |
+| `SKILLS_AUDITOR_MODE` | `full` (default) \| `discover` \| `dedup` \| `route` \| `traces` \| `sync` \| `close` |
+| `SKILLS_AUDITOR_ROUTE_PLATFORMS` | Comma-separated, e.g. `cursor,codex` |
+| `SKILLS_AUDITOR_ROUTE_STRATEGY` | `archive` (default) \| `delete` \| `keep` |
+| `SKILLS_AUDITOR_SYNC_MAP_FILE` | If non-empty, sync cycle runs with this `--map-file` |
+| `SKILLS_AUDITOR_DRY_RUN` | `1` → **no** `--apply` on dedup / route / sync (overrides default apply) |
+| `SKILLS_AUDITOR_CONFIG` | Path to an env file to source for the above |
 
-## Workflow
+**Default roots** when nothing is configured: `$HOME/.cursor/skills` and `$HOME/.claude/skills`.
 
-### Default full pipeline (cycles)
-
-When the user asks for a **full** skills-auditor pass and does **not** narrow scope to one subcommand, run **sequential cycles**. Treat **`audit`**, **`dedup`**, and **`route`** as **separate cycles** in the same pipeline—not optional extras. Each mutating cycle should follow **dry-run → review → `--apply` only after approval** (dedup, route, sync).
-
-| Cycle | Commands | Role |
-|-------|----------|------|
-| **1 — Discover** | `audit` (add `--with-drift` when remote truth matters); optional `drift-check`; optional `audit-discovery` when a discovery profile applies | Filesystem + link health, duplicate `name:` check, drift, collision map |
-| **2 — Dedup** | `dedup` (dry-run), then `dedup --apply` if the plan is acceptable | Hash-aware fold of mirror `SKILL.md` copies to a canonical path |
-| **3 — Route** | `route --platform <name>` (dry-run), then `route … --apply` after approval | Select-one per identity for multi-platform packs; writes traces under `~/.skills-auditor/traces/` |
-| **4 — Trace QA** | `audit-state-machine` (optional `--trace-dir`) | Validate traces (illegal transitions, coverage, consistency) |
-| **5 — Canonical sync** (optional) | Build `--map-file` → `sync` dry-run → `sync --apply` | Explicit relink to remotes; orthogonal to dedup/route |
-| **6 — Close** | `audit --with-drift` | Confirm end state |
-
-**Duplicate `name:` check**: `audit` runs it **by default** (same `name:` on more than one **resolved** `SKILL.md` under one bundle; symlinks to the same file count once). Use `--skip-duplicate-name-check` or `--fail-on-duplicate-names` only when the user specifies CI-style gating.
-
-### Partial / scoped runs
-
-If the user **explicitly** requests a **single** leg (e.g. “audit only”, “dedup dry-run on this dir”, “route Codex for `~/.claude/skills`”), **run only that cycle** with their **stated flags and paths**. Do not assume other cycles already ran.
-
-For cross-agent installs, use `--discovery-profile` and `--target-platform` as documented in the repo README when the user names them.
-
-## Commands
-
-Install once from the repo root: `pip install -e .` — then use the **`skills-audit`** CLI (or `python -m skills_auditor`). From an uninstalled clone you can still run `python3 scripts/skills_audit.py`.
+### Shell helper (build `--skills-dir` args)
 
 ```bash
-PRIMARY_SKILLS_DIR="${PRIMARY_SKILLS_DIR:-/path/to/primary/skills}"
-SECONDARY_SKILLS_DIR="${SECONDARY_SKILLS_DIR:-/path/to/secondary/skills}"
-
-# Audit (basic)
-skills-audit audit \
-  --skills-dir "$PRIMARY_SKILLS_DIR"
-
-# Audit Cursor + Claude Code global skills roots (repeat --skills-dir)
-skills-audit audit \
-  --skills-dir "$HOME/.cursor/skills" \
-  --skills-dir "$HOME/.claude/skills"
-
-# Audit with drift
-skills-audit audit \
-  --skills-dir "$PRIMARY_SKILLS_DIR" \
-  --with-drift
-
-# Drift check (standalone)
-skills-audit drift-check \
-  --skills-dir "$PRIMARY_SKILLS_DIR"
-
-# Dry-run sync
-skills-audit sync \
-  --skills-dir "$PRIMARY_SKILLS_DIR" \
-  --map-file config/sources.example.json
-
-# Discovery-layer audit
-skills-audit audit-discovery \
-  --profile-file config/discovery-profile.cursor-jz.example.json
-
-# Summary-only + CI gating
-skills-audit audit-discovery \
-  --profile-file config/discovery-profile.cursor-jz.example.json \
-  --summary-only \
-  --fail-on-conflict \
-  --fail-on-hash-conflict
-
-# ── Dedup (legacy, hash-aware) ──
-
-# Dry-run
-skills-audit dedup \
-  --skills-dir "$PRIMARY_SKILLS_DIR"
-
-# Apply
-skills-audit dedup \
-  --skills-dir "$HOME/.claude/skills" \
-  --apply
-
-# ── Select-One Routing (v0.6.0+) ──
-
-# Dry-run: see what route would do for Cursor
-skills-audit route \
-  --platform cursor \
-  --skills-dir "$HOME/.cursor/skills"
-
-# Route for Codex with delete strategy
-skills-audit route \
-  --platform codex \
-  --skills-dir "$HOME/.claude/skills" \
-  --strategy delete
-
-# Apply routing
-skills-audit route \
-  --platform cursor \
-  --skills-dir "$HOME/.cursor/skills" \
-  --strategy archive \
-  --apply
-
-# Custom trace output dir
-skills-audit route \
-  --platform cursor \
-  --skills-dir "$HOME/.cursor/skills" \
-  --trace-dir ./my-traces
-
-# ── State Machine Audit ──
-
-# Validate all accumulated traces
-skills-audit audit-state-machine
-
-# Audit traces from a specific directory
-skills-audit audit-state-machine \
-  --trace-dir ./my-traces
-
-# Apply sync
-skills-audit sync \
-  --skills-dir "$PRIMARY_SKILLS_DIR" \
-  --map-file config/sources.example.json \
-  --apply
+_roots="${SKILLS_AUDITOR_ROOTS:-$HOME/.cursor/skills $HOME/.claude/skills}"
+_roots="$_roots ${SKILLS_AUDITOR_EXTRA_ROOTS:-}"
+AUDIT_DIRS=()
+for d in $_roots; do
+  [ -d "$d" ] && AUDIT_DIRS+=(--skills-dir "$d")
+done
+DRIFT_FLAG=()
+[ "${SKILLS_AUDITOR_WITH_DRIFT:-0}" = "1" ] && DRIFT_FLAG=(--with-drift)
 ```
 
-## Select-One Routing (v0.6.0)
+Use `"${AUDIT_DIRS[@]}"` and `"${DRIFT_FLAG[@]}"` in `skills-audit` invocations.
 
-Four-phase pipeline for multi-platform skill packs:
+## Sub-skill system (progressive disclosure)
 
+| Cycle | Sub-skill |
+| --- | --- |
+| 1 — Discover | [`skills/discover/SKILL.md`](skills/discover/SKILL.md) |
+| 2 — Dedup | [`skills/dedup/SKILL.md`](skills/dedup/SKILL.md) |
+| 3 — Route | [`skills/route/SKILL.md`](skills/route/SKILL.md) |
+| 4 — Trace QA | [`skills/traces/SKILL.md`](skills/traces/SKILL.md) |
+| 5 — Sync (optional) | [`skills/sync/SKILL.md`](skills/sync/SKILL.md) |
+| 6 — Close | [`skills/close/SKILL.md`](skills/close/SKILL.md) |
+
+Index: [`skills/README.md`](skills/README.md).
+
+## Full pipeline recipe (agent-executable)
+
+**Default:** mutating steps use `--apply` unless `SKILLS_AUDITOR_DRY_RUN=1`.
+
+```bash
+set -euo pipefail
+# Optional: set -a && source "$SKILLS_AUDITOR_CONFIG" && set +a
+
+MODE="${SKILLS_AUDITOR_MODE:-full}"
+_roots="${SKILLS_AUDITOR_ROOTS:-$HOME/.cursor/skills $HOME/.claude/skills}"
+_roots="$_roots ${SKILLS_AUDITOR_EXTRA_ROOTS:-}"
+AUDIT_DIRS=()
+for d in $_roots; do [ -d "$d" ] && AUDIT_DIRS+=(--skills-dir "$d"); done
+DRIFT_FLAG=()
+[ "${SKILLS_AUDITOR_WITH_DRIFT:-1}" = "1" ] && DRIFT_FLAG=(--with-drift)
+RSTRAT="${SKILLS_AUDITOR_ROUTE_STRATEGY:-archive}"
+
+APPLY_MUT=()
+if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" != "1" ]; then
+  APPLY_MUT=(--apply)
+fi
+
+run_discover() { skills-audit audit "${AUDIT_DIRS[@]}" "${DRIFT_FLAG[@]}"; }
+run_close()    { skills-audit audit "${AUDIT_DIRS[@]}" "${DRIFT_FLAG[@]}"; }
+run_dedup()    { skills-audit dedup "${AUDIT_DIRS[@]}" "${APPLY_MUT[@]}"; }
+run_traces()   { skills-audit audit-state-machine; }
+run_sync() {
+  [ -n "${SKILLS_AUDITOR_SYNC_MAP_FILE:-}" ] || return 0
+  skills-audit sync "${AUDIT_DIRS[@]}" --map-file "$SKILLS_AUDITOR_SYNC_MAP_FILE" "${APPLY_MUT[@]}"
+}
+
+run_route_all() {
+  IFS=',' read -r -a plats <<< "${SKILLS_AUDITOR_ROUTE_PLATFORMS:-cursor,codex}"
+  for p in "${plats[@]}"; do
+    p="$(echo "$p" | xargs)"
+    [ -n "$p" ] || continue
+    skills-audit route --platform "$p" "${AUDIT_DIRS[@]}" --strategy "$RSTRAT" "${APPLY_MUT[@]}"
+  done
+}
+
+case "$MODE" in
+  discover) run_discover ;;
+  dedup)    run_dedup ;;
+  route)    run_route_all ;;
+  traces)   run_traces ;;
+  sync)     run_sync ;;
+  close)    run_close ;;
+  full)
+    run_discover
+    run_dedup
+    run_route_all
+    run_traces
+    run_sync
+    run_close
+    ;;
+  *) echo "Unknown SKILLS_AUDITOR_MODE=$MODE" >&2; exit 1 ;;
+esac
 ```
-DISCOVERED → CLASSIFIED → ROUTED → RESOLVED
 
-Phase 1 (Discover):  hash all variants
-Phase 2 (Classify):  infer platform via path convention (.agents/→codex, .factory/→factory)
-Phase 3 (Route):     exact match > wildcard; select one per identity
-Phase 4 (Resolve):   ACTIVE / ARCHIVED / DELETED / KEPT_HIDDEN / FLAGGED
-```
+## Isolation
 
-Every transition is recorded in a JSON trace file (`~/.skills-auditor/traces/`).
-Use `audit-state-machine` to batch-validate traces against transition rules.
+**Apply runs change the filesystem** — do **not** use `readonly` subagents for the default `/skills-auditor` pass. Use **readonly** only when the operator asked for **dry-run** / `SKILLS_AUDITOR_DRY_RUN=1`. See [Isolation Harness Recommendations](https://github.com/ERerGB/skills-auditor#isolation-harness-recommendations).
 
-### Resolve strategies
+## Safety rules (this skill contract)
 
-| Strategy | Superseded variants become | Use when |
-|----------|---------------------------|----------|
-| `archive` (default) | Renamed to `SKILL.md.archived-<timestamp>` | Safe — can undo |
-| `delete` | Removed from disk | Confident cleanup |
-| `keep` | Left in place (no filesystem change) | Audit-only, no side effects |
+- **`/skills-auditor` default:** `dedup`, `route`, and `sync` run with **`--apply`** when the user does **not** ask for dry-run.
+- **Opt out:** explicit “dry run” / “preview only” / **`SKILLS_AUDITOR_DRY_RUN=1`** → omit `--apply`.
+- **Destructive strategy:** `SKILLS_AUDITOR_ROUTE_STRATEGY=delete` removes files; only use when the operator is explicit.
 
-## Drift Check Behavior
+## CLI install
 
-- Only checks symlinked skills (directories without git context are skipped).
-- Runs `git fetch` for each skill's repo to get latest remote state.
-- Reports: `synced` (ahead=0, behind=0, dirty=0) or `DRIFT` with details.
-- **Display rule**: synced skills show the remote GitHub URL as their target; drifted skills show the local filesystem path. This makes the canonical source of truth immediately visible.
-- `audit --with-drift` merges drift data into the standard audit table.
-
-## Safety Rules
-
-- Default mode is dry-run.
-- Never apply without user confirmation.
-- For non-symlink existing entries, archive to timestamped backup before relinking.
-- If target has no `SKILL.md`, skip and report as error.
-- For discovery collisions, prefer profile-based source priority and keep same-hash folding enabled.
-- Use `--summary-only` and fail flags for periodic CI-style health checks.
-- **Isolation**: prefer subagent invocation for audit runs to avoid context pollution between sessions.
+`pip install -e .` from this repo, or `python3 scripts/skills_audit.py` from the repo root. Full command reference lives in sub-skills and in [`README.md`](README.md).
