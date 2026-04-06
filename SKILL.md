@@ -70,6 +70,8 @@ Index: [`skills/README.md`](skills/README.md).
 
 **Default:** mutating steps use `--apply` unless `SKILLS_AUDITOR_DRY_RUN=1`.
 
+**Run with `bash`** (e.g. `bash -c '…'` or a `.sh` shebang). **Do not** paste into **zsh**: `read -r -a` is bash-only. With **`set -u`**, expanding an **empty** optional-args array (e.g. `"${APPLY_MUT[@]}"` when dry-run and `APPLY_MUT=()`) throws **unbound variable** on common bash builds — the recipe below uses **explicit `if` branches** for `--apply` instead of a toggle array.
+
 ```bash
 set -euo pipefail
 # Optional: set -a && source "$SKILLS_AUDITOR_CONFIG" && set +a
@@ -83,18 +85,32 @@ DRIFT_FLAG=()
 [ "${SKILLS_AUDITOR_WITH_DRIFT:-1}" = "1" ] && DRIFT_FLAG=(--with-drift)
 RSTRAT="${SKILLS_AUDITOR_ROUTE_STRATEGY:-archive}"
 
-APPLY_MUT=()
-if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" != "1" ]; then
-  APPLY_MUT=(--apply)
-fi
+run_discover() {
+  if [ "${#DRIFT_FLAG[@]}" -eq 0 ]; then
+    skills-audit audit "${AUDIT_DIRS[@]}"
+  else
+    skills-audit audit "${AUDIT_DIRS[@]}" "${DRIFT_FLAG[@]}"
+  fi
+}
+run_close() { run_discover; }
 
-run_discover() { skills-audit audit "${AUDIT_DIRS[@]}" "${DRIFT_FLAG[@]}"; }
-run_close()    { skills-audit audit "${AUDIT_DIRS[@]}" "${DRIFT_FLAG[@]}"; }
-run_dedup()    { skills-audit dedup "${AUDIT_DIRS[@]}" "${APPLY_MUT[@]}"; }
-run_traces()   { skills-audit audit-state-machine; }
+run_dedup() {
+  if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" = "1" ]; then
+    skills-audit dedup "${AUDIT_DIRS[@]}"
+  else
+    skills-audit dedup "${AUDIT_DIRS[@]}" --apply
+  fi
+}
+
+run_traces() { skills-audit audit-state-machine; }
+
 run_sync() {
   [ -n "${SKILLS_AUDITOR_SYNC_MAP_FILE:-}" ] || return 0
-  skills-audit sync "${AUDIT_DIRS[@]}" --map-file "$SKILLS_AUDITOR_SYNC_MAP_FILE" "${APPLY_MUT[@]}"
+  if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" = "1" ]; then
+    skills-audit sync "${AUDIT_DIRS[@]}" --map-file "$SKILLS_AUDITOR_SYNC_MAP_FILE"
+  else
+    skills-audit sync "${AUDIT_DIRS[@]}" --map-file "$SKILLS_AUDITOR_SYNC_MAP_FILE" --apply
+  fi
 }
 
 run_route_all() {
@@ -102,7 +118,11 @@ run_route_all() {
   for p in "${plats[@]}"; do
     p="$(echo "$p" | xargs)"
     [ -n "$p" ] || continue
-    skills-audit route --platform "$p" "${AUDIT_DIRS[@]}" --strategy "$RSTRAT" "${APPLY_MUT[@]}"
+    if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" = "1" ]; then
+      skills-audit route --platform "$p" "${AUDIT_DIRS[@]}" --strategy "$RSTRAT"
+    else
+      skills-audit route --platform "$p" "${AUDIT_DIRS[@]}" --strategy "$RSTRAT" --apply
+    fi
   done
 }
 
