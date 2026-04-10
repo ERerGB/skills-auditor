@@ -32,6 +32,12 @@ This repo provides a safe workflow:
 - Safe replacement: existing directories are archived before relinking
 - CLI default dry-run until `--apply`; Cursor top skill [`SKILL.md`](SKILL.md) defaults to apply unless dry-run
 
+### Drift and dirty counts (`audit --with-drift`)
+
+- **`dirty_count` (repo):** number of `git status --porcelain` lines for the **whole** repository backing the skill path (same as before).
+- **`skill_dirty_count`:** same count **scoped** to the resolved skill directory via `git status --porcelain -- <path>`.
+- **Monorepos:** if only *other* paths in the repo are dirty, the audit table shows `skill_clean (repo_dirty=N)` instead of looking like that skill folder was edited. When the skill tree itself has changes, both `repo_dirty` and `skill_dirty` appear in `drift(...)`.
+
 ## Install
 
 From a clone of this repo, use a virtualenv (recommended on macOS / PEP 668):

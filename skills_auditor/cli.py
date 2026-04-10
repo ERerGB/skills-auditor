@@ -96,7 +96,10 @@ class DriftStatus:
     branch: Optional[str]
     ahead: int
     behind: int
+    # Lines from `git status --porcelain` for the entire repository (monorepo-wide).
     dirty_count: int
+    # Lines from `git status --porcelain -- <skill-relpath>` scoped to this skill tree.
+    skill_dirty_count: int
     synced: bool
     # When synced, display_target shows the remote URL; otherwise local path
     display_target: str
@@ -118,6 +121,15 @@ def _git(args: List[str], cwd: Path) -> Optional[str]:
         return None
 
 
+def _porcelain_line_count(git_root: Path, pathspec: Optional[str]) -> int:
+    """Count porcelain lines; if pathspec is set, scope to that path under git_root."""
+    args = ["status", "--porcelain"]
+    if pathspec:
+        args.extend(["--", pathspec])
+    out = _git(args, git_root)
+    return len(out.splitlines()) if out else 0
+
+
 def check_drift_for_path(name: str, path: Path) -> DriftStatus:
     """Check git sync status for a local skill path."""
     resolved = path.resolve()
@@ -129,6 +141,7 @@ def check_drift_for_path(name: str, path: Path) -> DriftStatus:
         return DriftStatus(
             name=name, local_path=local_str, remote_url=None,
             branch=None, ahead=0, behind=0, dirty_count=0,
+            skill_dirty_count=0,
             synced=False, display_target=local_str,
             error="not a git repository",
         )
@@ -149,6 +162,17 @@ def check_drift_for_path(name: str, path: Path) -> DriftStatus:
     dirty_out = _git(["status", "--porcelain"], git_root_path)
     dirty_count = len(dirty_out.splitlines()) if dirty_out else 0
 
+    skill_dirty_count = dirty_count
+    try:
+        rel = resolved.relative_to(git_root_path)
+        rel_spec = rel.as_posix()
+        if rel_spec != ".":
+            skill_dirty_count = _porcelain_line_count(git_root_path, rel_spec)
+        # else: resolved path is repo root — skill scope equals full repo
+    except ValueError:
+        # Skill path outside git root (unusual); treat skill scope as full-repo count
+        skill_dirty_count = dirty_count
+
     synced = ahead == 0 and behind == 0 and dirty_count == 0
 
     # Build a human-friendly remote display: github URL without .git suffix
@@ -159,7 +183,8 @@ def check_drift_for_path(name: str, path: Path) -> DriftStatus:
     return DriftStatus(
         name=name, local_path=local_str, remote_url=remote_url,
         branch=branch, ahead=ahead, behind=behind,
-        dirty_count=dirty_count, synced=synced,
+        dirty_count=dirty_count, skill_dirty_count=skill_dirty_count,
+        synced=synced,
         display_target=display,
     )
 
@@ -1333,6 +1358,14 @@ def print_audit(
                 row += f"\t{drift.error}"
             elif drift.synced:
                 row += "\tsynced"
+            elif (
+                drift.ahead == 0
+                and drift.behind == 0
+                and drift.skill_dirty_count == 0
+                and drift.dirty_count > 0
+            ):
+                # Monorepo: skill subtree clean; other paths in the repo are dirty
+                row += f"\tskill_clean (repo_dirty={drift.dirty_count})"
             else:
                 parts = []
                 if drift.ahead > 0:
@@ -1340,7 +1373,9 @@ def print_audit(
                 if drift.behind > 0:
                     parts.append(f"behind={drift.behind}")
                 if drift.dirty_count > 0:
-                    parts.append(f"dirty={drift.dirty_count}")
+                    parts.append(f"repo_dirty={drift.dirty_count}")
+                if drift.skill_dirty_count > 0:
+                    parts.append(f"skill_dirty={drift.skill_dirty_count}")
                 row += f"\tdrift({', '.join(parts)})"
         print(row)
 
@@ -1451,14 +1486,14 @@ def print_discovery_report(
 
 
 def print_drift_report(drifts: List[DriftStatus]) -> None:
-    print("name\tsynced\tbranch\tahead\tbehind\tdirty\tdisplay_target")
+    print("name\tsynced\tbranch\tahead\tbehind\trepo_dirty\tskill_dirty\tdisplay_target")
     for d in drifts:
         sync_label = "synced" if d.synced else "DRIFT"
         if d.error:
             sync_label = d.error
         print(
             f"{d.name}\t{sync_label}\t{d.branch or '-'}\t"
-            f"{d.ahead}\t{d.behind}\t{d.dirty_count}\t{d.display_target}"
+            f"{d.ahead}\t{d.behind}\t{d.dirty_count}\t{d.skill_dirty_count}\t{d.display_target}"
         )
 
     synced_count = sum(1 for d in drifts if d.synced)
