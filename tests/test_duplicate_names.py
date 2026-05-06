@@ -56,5 +56,27 @@ class TestDuplicateNames(unittest.TestCase):
             self.assertEqual(found, [], msg=str(found))
 
 
+    def test_cross_top_level_dup_same_name(self) -> None:
+        """Hosts that rglob the install root see both top-level and nested pack exports."""
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base)
+            skills = root / "skills"
+            skills.mkdir()
+
+            flat = skills / "browse"
+            flat.mkdir()
+            (flat / "SKILL.md").write_text("---\nname: browse\n---\nbody\n", encoding="utf-8")
+
+            nested = skills / "gstack" / "browse"
+            nested.mkdir(parents=True)
+            (nested / "SKILL.md").write_text("---\nname: browse\n---\nbody\n", encoding="utf-8")
+
+            found = collect_duplicate_skill_names(skills)
+            self.assertEqual(len(found), 1)
+            self.assertEqual(found[0].skill_name, "browse")
+            self.assertEqual(found[0].bundle, "browse")
+            self.assertEqual(len(found[0].skill_md_paths), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

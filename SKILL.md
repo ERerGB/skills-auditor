@@ -18,6 +18,8 @@ When the user invokes **`/skills-auditor`** or this skill **without** asking to 
 3. **Dry-run exception:** if the user **explicitly** asks for dry-run (e.g. “dry run”, “只预览”, “不要 apply”, “plan only”) **or** **`SKILLS_AUDITOR_DRY_RUN=1`**, then **omit** `--apply` on those commands.
 4. If **`SKILLS_AUDITOR_MODE`** is a single cycle name, run **only** that cycle (same apply vs dry-run rules).
 
+**Duplicate-name audit / dedup scope:** `skills-audit` treats each `--skills-dir` as one **install root** and scans **recursively** for colliding frontmatter `name:` (same scope Slash-style hosts use). That includes duplicates across sibling folders (for example `browse/` vs `gstack/browse/`), not only files nested inside the same top-level pack.
+
 **Narrowing without env files:** “audit only” → discover only (never mutating). “dedup dry-run” → dedup without `--apply`. “route Codex” with no dry-run wording → route **with** `--apply` for that run.
 
 ## Configuration (optional)

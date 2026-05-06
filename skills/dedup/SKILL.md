@@ -14,6 +14,7 @@ description: >
 
 ## Important
 
+- Dedup scans the **entire** install root passed to `--skills-dir` (Slash-style recursive view), so it catches both in-pack mirrors and **sibling-folder** duplicates (e.g. `browse/` vs `gstack/browse/`).
 - **Different hashes** → dedup reports `skip_multi_version`; use **route** sub-skill instead.
 - **Top skill default:** `/skills-auditor` runs dedup **with** `--apply` unless the operator asks for dry-run or sets `SKILLS_AUDITOR_DRY_RUN=1`.
 

@@ -81,7 +81,7 @@ class TestDedup(unittest.TestCase):
             self.assertEqual(actions2, [])
 
     def test_multiple_bundles(self) -> None:
-        """Dedup operates per-bundle independently."""
+        """Only colliding names are grouped; unrelated packs are ignored."""
         with tempfile.TemporaryDirectory() as base:
             skills = Path(base) / "skills"
             # Bundle A: has duplicates

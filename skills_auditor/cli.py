@@ -287,12 +287,31 @@ def _skill_md_path_is_under_ignored_segment(skill_md: Path) -> bool:
     return any(part in _IGNORE_SKILL_SCAN_SEGMENTS for part in skill_md.parts)
 
 
+def _skill_md_under_visible_install_tree(skill_md: Path, skills_dir: Path) -> bool:
+    """Match historical behavior: never scan under top-level hidden dirs of skills_dir.
+
+    Nested segments like `.github/` or `.agents/` are still allowed — only the first
+    path component under *skills_dir* must not start with a dot.
+    """
+    try:
+        rel = skill_md.relative_to(skills_dir)
+    except ValueError:
+        return False
+    if not rel.parts:
+        return False
+    return not rel.parts[0].startswith(".")
+
+
 @dataclass
 class DuplicateSkillNameFinding:
-    """Same frontmatter `name:` declared by more than one distinct SKILL.md file under one bundle.
+    """Same frontmatter `name:` declared by more than one distinct SKILL.md under one skills install root.
 
     Paths listed are one representative path per resolved real file (symlinks to the same
     inode count once).
+
+    ``bundle`` is the **top-level skill folder** containing the canonical (shortest-path) file,
+    for stable reporting and trace identity — even when duplicates span sibling folders
+    (e.g. ``browse/SKILL.md`` vs ``gstack/browse/SKILL.md``).
     """
 
     bundle: str
@@ -301,10 +320,16 @@ class DuplicateSkillNameFinding:
 
 
 def collect_duplicate_skill_names(skills_dir: Path) -> List[DuplicateSkillNameFinding]:
-    """Per immediate child of skills_dir (bundle), find duplicate `name:` values in nested SKILL.md files.
+    """Find duplicate ``name:`` values across **all** SKILL.md files under *skills_dir*.
 
-    Catches packs like gstack that ship `.agents/skills/gstack/SKILL.md` alongside `gstack/SKILL.md`,
-    which can confuse hosts that index recursively (multiple `/gstack` in the Skill list).
+    This matches how Slash / many hosts index skills: recursive discovery over the install
+    root, not isolated per top-level child folder.
+
+    Covers:
+
+    - Nested mirrors inside one pack (``gstack/SKILL.md`` vs ``gstack/.agents/.../SKILL.md``).
+    - **Cross-folder duplicates** that old per-bundle scans missed (e.g. both
+      ``<root>/browse/SKILL.md`` and ``<root>/gstack/browse/SKILL.md``), which inflate Slash lists.
 
     Multiple paths that are symlinks to the same resolved file are folded into one entry
     (dedupe by ``Path.resolve()``), avoiding false positives for DRY symlink layouts
@@ -314,48 +339,44 @@ def collect_duplicate_skill_names(skills_dir: Path) -> List[DuplicateSkillNameFi
     if not skills_dir.exists() or not skills_dir.is_dir():
         return findings
 
-    for entry in sorted(skills_dir.iterdir(), key=lambda p: p.name.lower()):
-        if entry.name.startswith("."):
-            continue
-        if entry.is_file() and not entry.is_symlink():
-            continue
-        try:
-            root = entry.resolve()
-        except OSError:
-            continue
-        if not root.is_dir():
-            continue
+    # name -> { resolved_realpath_str: representative Path }
+    by_name: Dict[str, Dict[str, Path]] = {}
+    try:
+        for skill_md in skills_dir.rglob("SKILL.md"):
+            if not _skill_md_under_visible_install_tree(skill_md, skills_dir):
+                continue
+            if _skill_md_path_is_under_ignored_segment(skill_md):
+                continue
+            try:
+                real_key = str(skill_md.resolve())
+            except OSError:
+                continue
+            try:
+                name = parse_skill_name(skill_md)
+            except OSError:
+                continue
+            bucket = by_name.setdefault(name, {})
+            if real_key not in bucket:
+                bucket[real_key] = skill_md
+    except OSError:
+        return findings
 
-        # name -> { resolved_realpath_str: representative Path }
-        by_name: Dict[str, Dict[str, Path]] = {}
-        try:
-            for skill_md in root.rglob("SKILL.md"):
-                if _skill_md_path_is_under_ignored_segment(skill_md):
-                    continue
-                try:
-                    real_key = str(skill_md.resolve())
-                except OSError:
-                    continue
-                try:
-                    name = parse_skill_name(skill_md)
-                except OSError:
-                    continue
-                bucket = by_name.setdefault(name, {})
-                if real_key not in bucket:
-                    bucket[real_key] = skill_md
-        except OSError:
+    for skill_name in sorted(by_name.keys()):
+        reps = sorted(by_name[skill_name].values(), key=lambda p: str(p).lower())
+        if len(reps) <= 1:
             continue
-
-        for skill_name in sorted(by_name.keys()):
-            reps = sorted(by_name[skill_name].values(), key=lambda p: str(p).lower())
-            if len(reps) > 1:
-                findings.append(
-                    DuplicateSkillNameFinding(
-                        bundle=entry.name,
-                        skill_name=skill_name,
-                        skill_md_paths=[str(p) for p in reps],
-                    )
-                )
+        canonical = min(reps, key=lambda p: (len(str(p)), str(p).lower()))
+        try:
+            bundle_label = _bundle_root_for(canonical, skills_dir).name
+        except ValueError:
+            bundle_label = canonical.parent.name
+        findings.append(
+            DuplicateSkillNameFinding(
+                bundle=bundle_label,
+                skill_name=skill_name,
+                skill_md_paths=[str(p) for p in reps],
+            )
+        )
     return findings
 
 
@@ -363,13 +384,14 @@ def print_duplicate_name_check(
     skills_dir: Path,
     findings: List[DuplicateSkillNameFinding],
 ) -> None:
-    print("\nduplicate frontmatter name: check (per top-level bundle)")
+    print("\nduplicate frontmatter name: check (install root / Slash host view)")
     print(
         "Detects multiple distinct SKILL.md files (by resolved path) declaring the same `name:` "
-        "under one install folder (e.g. gstack + .agents copy). Symlinks to the same file count once."
+        "anywhere under this install root — including sibling-folder duplicates "
+        "(e.g. browse/ vs gstack/browse/). Symlinks to the same file count once."
     )
     if not findings:
-        print("status: ok (no duplicate names within any bundle)")
+        print("status: ok (no duplicate names under this install root)")
         print("\njson:")
         print(json.dumps({"skills_dir": str(skills_dir), "findings": []}, indent=2))
         return
@@ -1524,12 +1546,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit.add_argument(
         "--skip-duplicate-name-check",
         action="store_true",
-        help="Skip the default scan for duplicate `name:` in nested SKILL.md under each bundle.",
+        help=(
+            "Skip the default scan for duplicate `name:` across SKILL.md under this install root "
+            "(Slash-style recursive view)."
+        ),
     )
     p_audit.add_argument(
         "--fail-on-duplicate-names",
         action="store_true",
-        help="Exit with code 4 if any bundle has multiple SKILL.md declaring the same name.",
+        help=(
+            "Exit with code 4 if this install root has multiple SKILL.md declaring the same name."
+        ),
     )
 
     p_drift = sub.add_parser("drift-check", help="Check git sync status for symlinked skills")

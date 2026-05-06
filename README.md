@@ -171,7 +171,7 @@ skills-audit sync \
 
 ### `dedup`
 
-Detect duplicate frontmatter `name:` across nested SKILL.md files within each bundle, then replace non-canonical copies with relative symlinks to the shortest-path canonical file.
+Detect duplicate frontmatter `name:` across **all** nested `SKILL.md` files under an install root (the same scope Slash and similar hosts use when listing `/` skills), then replace non-canonical copies with relative symlinks to the shortest-path canonical file.
 
 **Hash-aware dedup (v0.5.0):** `dedup` now compares file content hashes before acting:
 
@@ -199,8 +199,10 @@ skills-audit dedup --skills-dir "$HOME/.claude/skills" --apply
 skills-audit audit --skills-dir "$HOME/.claude/skills" --fail-on-duplicate-names
 ```
 
-**Canonical selection heuristic:** shortest path relative to the bundle root wins. For a typical gstack layout:
-- `gstack/SKILL.md` (canonical — shortest)
+**Canonical selection heuristic:** shortest path under the **install root** wins. Examples:
+
+- `browse/SKILL.md` (canonical) vs `gstack/browse/SKILL.md` → relink the nested copy when hashes match
+- `gstack/SKILL.md` (canonical — shortest inside the pack)
 - `gstack/.agents/skills/gstack/SKILL.md` → symlink (if identical) or preserved (if different)
 - `gstack/.factory/skills/gstack/SKILL.md` → symlink (if identical) or preserved (if different)
 

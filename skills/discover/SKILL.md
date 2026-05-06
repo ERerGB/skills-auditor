@@ -45,7 +45,7 @@ skills-audit audit-discovery \
 
 ## Outputs to hand off
 
-- Tables: `link_status`, `has_skill_md`, duplicate `name:` bundle status, optional drift columns.
+- Tables: `link_status`, `has_skill_md`, duplicate `name:` **install-root** status (Slash-style recursive scan), optional drift columns.
 - JSON blocks in CLI output for scripting.
 
 ## Drift behavior
