@@ -22,6 +22,8 @@ When the user invokes **`/skills-auditor`** or this skill **without** asking to 
 
 **Narrowing without env files:** “audit only” → discover only (never mutating). “dedup dry-run” → dedup without `--apply`. “route Codex” with no dry-run wording → route **with** `--apply` for that run.
 
+**Codex metadata check:** run `skills-audit metadata --platform codex --skills-dir <root> --fail-on-invalid` to validate `SKILL.md` frontmatter. The Codex profile requires a fenced frontmatter block with non-empty `name` and `description`; `audit --check-metadata --metadata-platform codex --fail-on-invalid-metadata` runs the same check during audit.
+
 ## Configuration (optional)
 
 Template: [`config/skills-auditor.pipeline.example.env`](config/skills-auditor.pipeline.example.env).

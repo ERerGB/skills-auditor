@@ -106,6 +106,18 @@ class DriftStatus:
     error: Optional[str] = None
 
 
+@dataclass
+class MetadataFinding:
+    skill_md_path: str
+    severity: str
+    code: str
+    message: str
+
+
+_SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+_FRONTMATTER_SCALAR_RE = re.compile(r"^([^:#][^:]*):\s*(.*)$")
+
+
 def _git(args: List[str], cwd: Path) -> Optional[str]:
     """Run a git command and return stripped stdout, or None on failure."""
     try:
@@ -269,6 +281,127 @@ def parse_skill_name(skill_md: Path) -> str:
     return skill_md.parent.name
 
 
+def _extract_frontmatter(text: str) -> Tuple[Optional[List[str]], Optional[str]]:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None, "missing_frontmatter"
+    for idx, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            return lines[1:idx], None
+    return None, "unclosed_frontmatter"
+
+
+def _clean_frontmatter_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1].strip()
+    return value
+
+
+def _parse_frontmatter_scalars(
+    lines: List[str],
+    skill_md: Path,
+) -> Tuple[Dict[str, str], List[MetadataFinding]]:
+    fields: Dict[str, str] = {}
+    findings: List[MetadataFinding] = []
+    current_block_key: Optional[str] = None
+
+    for lineno, line in enumerate(lines, start=2):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if line[:1].isspace():
+            if current_block_key and stripped:
+                fields[current_block_key] = (fields[current_block_key] + " " + stripped).strip()
+            continue
+
+        current_block_key = None
+        match = _FRONTMATTER_SCALAR_RE.match(line)
+        if not match:
+            findings.append(
+                MetadataFinding(
+                    str(skill_md),
+                    "error",
+                    "malformed_frontmatter_line",
+                    f"line {lineno}: expected a top-level `key: value` entry",
+                )
+            )
+            continue
+
+        key = match.group(1).strip()
+        value = _clean_frontmatter_value(match.group(2))
+        if key in fields:
+            findings.append(
+                MetadataFinding(
+                    str(skill_md),
+                    "error",
+                    "duplicate_frontmatter_key",
+                    f"line {lineno}: duplicate frontmatter key `{key}`",
+                )
+            )
+        fields[key] = "" if value in {">", "|", ">-", "|-"} else value
+        if value in {">", "|", ">-", "|-"}:
+            current_block_key = key
+
+    return fields, findings
+
+
+def validate_skill_metadata(skill_md: Path, platform: str = "codex") -> List[MetadataFinding]:
+    text = skill_md.read_text(encoding="utf-8", errors="replace")
+    lines, frontmatter_error = _extract_frontmatter(text)
+    if frontmatter_error:
+        message = (
+            "SKILL.md must start with a `---` frontmatter block"
+            if frontmatter_error == "missing_frontmatter"
+            else "frontmatter block must be closed with `---`"
+        )
+        return [MetadataFinding(str(skill_md), "error", frontmatter_error, message)]
+
+    assert lines is not None
+    fields, findings = _parse_frontmatter_scalars(lines, skill_md)
+    required = ["name"]
+    if platform == "codex":
+        required.append("description")
+
+    for key in required:
+        if not fields.get(key, "").strip():
+            findings.append(
+                MetadataFinding(
+                    str(skill_md),
+                    "error",
+                    f"missing_{key}",
+                    f"frontmatter `{key}` is required for {platform}",
+                )
+            )
+
+    name = fields.get("name", "").strip()
+    if name and not _SKILL_NAME_RE.match(name):
+        findings.append(
+            MetadataFinding(
+                str(skill_md),
+                "error",
+                "invalid_name",
+                "frontmatter `name` must start with an alphanumeric character and contain only letters, numbers, dots, underscores, hyphens, or slashes",
+            )
+        )
+
+    return findings
+
+
+def collect_metadata_findings(skills_dir: Path, platform: str = "codex") -> List[MetadataFinding]:
+    findings: List[MetadataFinding] = []
+    if not skills_dir.exists() or not skills_dir.is_dir():
+        return findings
+    for skill_md in sorted(skills_dir.rglob("SKILL.md"), key=lambda p: str(p).lower()):
+        if _skill_md_path_is_under_ignored_segment(skill_md):
+            continue
+        if not _skill_md_under_visible_install_tree(skill_md, skills_dir):
+            continue
+        findings.extend(validate_skill_metadata(skill_md, platform=platform))
+    return findings
+
+
 # When scanning a skill pack for duplicate frontmatter names, skip these path segments.
 _IGNORE_SKILL_SCAN_SEGMENTS = frozenset(
     {
@@ -409,6 +542,36 @@ def print_duplicate_name_check(
         json.dumps(
             {
                 "skills_dir": str(skills_dir),
+                "findings": [asdict(f) for f in findings],
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+
+
+def print_metadata_check(
+    skills_dir: Path,
+    findings: List[MetadataFinding],
+    platform: str,
+) -> None:
+    print(f"\nmetadata: check (platform={platform})")
+    if not findings:
+        print(f"status: ok (no frontmatter metadata problems under {skills_dir})")
+        print("\njson:")
+        print(json.dumps({"skills_dir": str(skills_dir), "platform": platform, "findings": []}, indent=2))
+        return
+
+    print("status: findings present")
+    print("severity\tcode\tpath\tmessage")
+    for f in findings:
+        print(f"{f.severity}\t{f.code}\t{f.skill_md_path}\t{f.message}")
+    print("\njson:")
+    print(
+        json.dumps(
+            {
+                "skills_dir": str(skills_dir),
+                "platform": platform,
                 "findings": [asdict(f) for f in findings],
             },
             indent=2,
@@ -1683,6 +1846,43 @@ def build_parser() -> argparse.ArgumentParser:
             "Exit with code 4 if this install root has multiple SKILL.md declaring the same name."
         ),
     )
+    p_audit.add_argument(
+        "--check-metadata",
+        action="store_true",
+        help="Validate SKILL.md frontmatter metadata under this install root.",
+    )
+    p_audit.add_argument(
+        "--metadata-platform",
+        default="codex",
+        help="Metadata validation platform profile (default: codex).",
+    )
+    p_audit.add_argument(
+        "--fail-on-invalid-metadata",
+        action="store_true",
+        help="Exit with code 5 when --check-metadata finds invalid frontmatter metadata.",
+    )
+
+    p_metadata = sub.add_parser(
+        "metadata",
+        help="Validate SKILL.md frontmatter metadata under one or more skill roots",
+    )
+    p_metadata.add_argument(
+        "--skills-dir",
+        action="append",
+        dest="skills_dirs",
+        metavar="DIR",
+        help="Skill root (repeat for multiple). Default: ~/.cursor/skills",
+    )
+    p_metadata.add_argument(
+        "--platform",
+        default="codex",
+        help="Metadata validation platform profile (default: codex).",
+    )
+    p_metadata.add_argument(
+        "--fail-on-invalid",
+        action="store_true",
+        help="Exit with code 5 if invalid frontmatter metadata is found.",
+    )
 
     p_drift = sub.add_parser("drift-check", help="Check git sync status for symlinked skills")
     p_drift.add_argument(
@@ -1848,6 +2048,7 @@ def main() -> int:
 
     if args.command == "audit":
         duplicate_exit = False
+        metadata_exit = False
         for idx, skills_dir in enumerate(resolve_skills_dirs(args.skills_dirs)):
             if idx > 0:
                 print()
@@ -1865,8 +2066,32 @@ def main() -> int:
                 print_duplicate_name_check(skills_dir, dup_findings)
                 if dup_findings:
                     duplicate_exit = True
+            if args.check_metadata:
+                metadata_findings = collect_metadata_findings(
+                    skills_dir,
+                    platform=args.metadata_platform,
+                )
+                print_metadata_check(skills_dir, metadata_findings, args.metadata_platform)
+                if metadata_findings:
+                    metadata_exit = True
+        if args.fail_on_invalid_metadata and metadata_exit:
+            return 5
         if args.fail_on_duplicate_names and duplicate_exit:
             return 4
+        return 0
+
+    if args.command == "metadata":
+        metadata_exit = False
+        for idx, skills_dir in enumerate(resolve_skills_dirs(args.skills_dirs)):
+            if idx > 0:
+                print()
+            print(f"skills-dir: {skills_dir}")
+            findings = collect_metadata_findings(skills_dir, platform=args.platform)
+            print_metadata_check(skills_dir, findings, args.platform)
+            if findings:
+                metadata_exit = True
+        if args.fail_on_invalid and metadata_exit:
+            return 5
         return 0
 
     if args.command == "drift-check":

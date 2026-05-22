@@ -25,6 +25,7 @@ This repo provides a safe workflow:
 - Detect symlink health (`ok` / `broken`)
 - Detect folder mode (`symlink` / `directory` / `file`)
 - Audit discovery-layer collisions across multiple sources
+- Validate `SKILL.md` frontmatter metadata, including Codex-ready `name` + `description`
 - **Platform-tagged discovery profiles** (`cursor`, `claude-code`, or `*`): see below
 - Build canonical injection preview with source priority (includes per-source platforms)
 - Sync selected skills to canonical sources via mapping file
@@ -167,6 +168,25 @@ skills-audit sync \
 ```
 
 Use `--apply` to execute changes.
+
+### `metadata`
+
+Validate `SKILL.md` frontmatter under one or more install roots. The default platform profile is
+`codex`, which requires a fenced frontmatter block with non-empty `name` and `description`
+fields.
+
+```bash
+skills-audit metadata \
+  --platform codex \
+  --skills-dir "$HOME/.codex/skills" \
+  --fail-on-invalid
+
+skills-audit audit \
+  --skills-dir "$HOME/.codex/skills" \
+  --check-metadata \
+  --metadata-platform codex \
+  --fail-on-invalid-metadata
+```
 
 **Platform-aware sync:** when you use the same map against both Cursor and Claude Code trees, pass the same discovery profile and `--target-platform cursor` or `claude-code`. Entries whose map target path falls under a profile source that does not list that platform are reported as `skip_platform` (no symlink changes).
 
