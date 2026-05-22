@@ -1849,7 +1849,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit.add_argument(
         "--check-metadata",
         action="store_true",
-        help="Validate SKILL.md frontmatter metadata under this install root.",
+        help=argparse.SUPPRESS,
+    )
+    p_audit.add_argument(
+        "--skip-metadata-check",
+        action="store_true",
+        help="Skip the default SKILL.md frontmatter metadata validation.",
     )
     p_audit.add_argument(
         "--metadata-platform",
@@ -1859,7 +1864,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit.add_argument(
         "--fail-on-invalid-metadata",
         action="store_true",
-        help="Exit with code 5 when --check-metadata finds invalid frontmatter metadata.",
+        help=argparse.SUPPRESS,
+    )
+    p_audit.add_argument(
+        "--allow-invalid-metadata",
+        action="store_true",
+        help="Report metadata findings but do not fail audit with exit code 5.",
     )
 
     p_metadata = sub.add_parser(
@@ -2066,7 +2076,7 @@ def main() -> int:
                 print_duplicate_name_check(skills_dir, dup_findings)
                 if dup_findings:
                     duplicate_exit = True
-            if args.check_metadata:
+            if not args.skip_metadata_check:
                 metadata_findings = collect_metadata_findings(
                     skills_dir,
                     platform=args.metadata_platform,
@@ -2074,7 +2084,7 @@ def main() -> int:
                 print_metadata_check(skills_dir, metadata_findings, args.metadata_platform)
                 if metadata_findings:
                     metadata_exit = True
-        if args.fail_on_invalid_metadata and metadata_exit:
+        if metadata_exit and not args.allow_invalid_metadata:
             return 5
         if args.fail_on_duplicate_names and duplicate_exit:
             return 4

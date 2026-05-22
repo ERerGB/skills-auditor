@@ -20,9 +20,11 @@ When the user invokes **`/skills-auditor`** or this skill **without** asking to 
 
 **Duplicate-name audit / dedup scope:** `skills-audit` treats each `--skills-dir` as one **install root** and scans **recursively** for colliding frontmatter `name:` (same scope Slash-style hosts use). That includes duplicates across sibling folders (for example `browse/` vs `gstack/browse/`), not only files nested inside the same top-level pack.
 
+**Metadata audit scope:** `audit` validates `SKILL.md` frontmatter by default for every visible skill under each `--skills-dir`. The default platform profile is `codex`; invalid metadata exits with code **5** unless `--allow-invalid-metadata` is passed. Use `--skip-metadata-check` only for narrow investigation runs.
+
 **Narrowing without env files:** “audit only” → discover only (never mutating). “dedup dry-run” → dedup without `--apply`. “route Codex” with no dry-run wording → route **with** `--apply` for that run.
 
-**Codex metadata check:** run `skills-audit metadata --platform codex --skills-dir <root> --fail-on-invalid` to validate `SKILL.md` frontmatter. The Codex profile requires a fenced frontmatter block with non-empty `name` and `description`; `audit --check-metadata --metadata-platform codex --fail-on-invalid-metadata` runs the same check during audit.
+**Codex metadata check:** run `skills-audit metadata --platform codex --skills-dir <root> --fail-on-invalid` for a standalone validation pass. The Codex profile requires a fenced frontmatter block with non-empty `name` and `description`.
 
 ## Configuration (optional)
 
