@@ -28,6 +28,7 @@ This repo provides a safe workflow:
 - **Platform-tagged discovery profiles** (`cursor`, `claude-code`, or `*`): see below
 - Build canonical injection preview with source priority (includes per-source platforms)
 - Sync selected skills to canonical sources via mapping file
+- Discovery-driven sync (`sync-discover`) that recursively scans source roots, aliases slash names for install roots, and replicates skills into multiple agent environments without a hand-maintained map
 - **Optional `--target-platform` + `--discovery-profile`** on `sync` to skip skills whose canonical path lives under a source that does not allow that platform
 - Safe replacement: existing directories are archived before relinking
 - CLI default dry-run until `--apply`; Cursor top skill [`SKILL.md`](SKILL.md) defaults to apply unless dry-run
@@ -88,7 +89,15 @@ skills-audit audit-discovery \
   --source "$HOME/.cursor/skills-cursor" \
   --source "/path/to/your/project/.cursor/skills"
 
-# 4) Apply sync
+# 4) Discovery-driven sync into Cursor + Claude + Codex roots (dry-run)
+skills-audit sync-discover \
+  --source /path/to/project/.agents/skills \
+  --source /path/to/project/.cursor/skills \
+  --source /path/to/project/.claude/skills \
+  --skills-dir /path/to/project/.codex/skills \
+  --skills-dir "$HOME/.codex/skills"
+
+# 5) Apply mapped sync
 skills-audit sync \
   --skills-dir "$HOME/.cursor/skills" \
   --map-file config/sources.example.json \
@@ -168,6 +177,38 @@ skills-audit sync \
   --discovery-profile config/discovery-profile.cursor-jz.example.json \
   --target-platform claude-code
 ```
+
+### `sync-discover`
+
+Discover canonical skills from one or more source roots and sync them into one or more install roots without a hand-maintained JSON map. This is the preferred command when a repository wants all skills under its agent directories to be discoverable by multiple hosts.
+
+```bash
+# Dry-run using explicit source roots
+skills-audit sync-discover \
+  --source .agents/skills \
+  --source .cursor/skills \
+  --source .claude/skills \
+  --skills-dir .codex/skills \
+  --skills-dir "$HOME/.codex/skills"
+
+# Include installed global Cursor / Claude roots as extra source roots
+skills-audit sync-discover \
+  --skills-dir .agents/skills \
+  --skills-dir .cursor/skills \
+  --skills-dir .claude/skills \
+  --skills-dir .codex/skills \
+  --skills-dir "$HOME/.codex/skills" \
+  --include-global-sources \
+  --apply
+```
+
+Rules:
+
+- Sources are scanned recursively for `SKILL.md`.
+- The frontmatter `name:` is the logical skill identity; missing names fall back to the parent folder.
+- Slash names such as `magpie-loom/extract-leads` are exposed as top-level install aliases such as `magpie-loom-extract-leads`.
+- Each target root excludes its own canonical `target/alias` directory from the generated plan so local authoring directories are not backed up and replaced by self-links.
+- Dry-run remains the default; pass `--apply` to mutate.
 
 ### `dedup`
 

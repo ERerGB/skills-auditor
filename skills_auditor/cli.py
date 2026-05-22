@@ -261,8 +261,9 @@ def load_mapping(map_file: Path) -> Dict[str, str]:
 
 def parse_skill_name(skill_md: Path) -> str:
     text = skill_md.read_text(encoding="utf-8", errors="replace")
-    # Parse frontmatter first, then fallback to folder name.
-    match = re.search(r"(?m)^name:\s*([a-z0-9-]+)\s*$", text)
+    # Parse frontmatter first, then fallback to folder name. Slash names are
+    # valid logical names; sync-discover turns them into host-safe aliases.
+    match = re.search(r"(?m)^name:\s*[\'\"]?([^\'\"\n]+?)[\'\"]?\s*$", text)
     if match:
         return match.group(1).strip()
     return skill_md.parent.name
@@ -1231,6 +1232,130 @@ def summarize_discovery(choices: List[DiscoveryChoice]) -> DiscoverySummary:
     )
 
 
+
+def skill_alias_for_install_root(logical_name: str) -> str:
+    """Return a top-level, host-safe folder name for a logical skill name."""
+    alias = re.sub(r"[\\/]+", "-", logical_name)
+    alias = re.sub(r"[^A-Za-z0-9._-]+", "-", alias)
+    alias = re.sub(r"-+", "-", alias).strip("-")
+    return alias
+
+
+def _walk_skill_dirs(source_root: Path) -> List[Path]:
+    """Recursively find directories containing SKILL.md under one source root.
+
+    Source roots often contain symlinked skill directories. Follow directory
+    symlinks so those installed entries can be replicated into other agent
+    environments, while tracking resolved directories to avoid cycles.
+    """
+    if not source_root.exists() or not source_root.is_dir():
+        return []
+
+    out: List[Path] = []
+    seen_dirs: set[str] = set()
+
+    def walk_dir(current: Path) -> None:
+        try:
+            resolved_current = str(current.resolve())
+        except OSError:
+            return
+        if resolved_current in seen_dirs:
+            return
+        seen_dirs.add(resolved_current)
+
+        skill_md = current / "SKILL.md"
+        if skill_md.exists() and not _skill_md_path_is_under_ignored_segment(skill_md):
+            out.append(current)
+
+        try:
+            entries = sorted(current.iterdir(), key=lambda p: p.name.lower())
+        except OSError:
+            return
+        for entry in entries:
+            if entry.name in _IGNORE_SKILL_SCAN_SEGMENTS:
+                continue
+            try:
+                if not entry.is_dir():
+                    continue
+            except OSError:
+                continue
+            walk_dir(entry)
+
+    walk_dir(source_root)
+    return out
+
+
+def discover_sync_mapping(
+    sources: List[Path],
+    *,
+    exclude_target_root: Optional[Path] = None,
+) -> Dict[str, str]:
+    """Build a sync map by discovering SKILL.md files under source roots.
+
+    The returned mapping is suitable for ``plan_sync``: ``{install_alias: absolute_path}``.
+    If ``exclude_target_root`` is passed, a skill whose canonical path already occupies
+    ``exclude_target_root / alias`` is omitted for that target to avoid backing up a
+    canonical local directory and replacing it with a symlink to itself.
+    """
+    by_alias: Dict[str, Tuple[str, str]] = {}
+    seen_resolved: set[str] = set()
+    conflicts: List[str] = []
+    excluded_root = exclude_target_root.expanduser().resolve() if exclude_target_root else None
+
+    for source in sources:
+        source_root = source.expanduser()
+        if not source_root.exists():
+            continue
+        for skill_root in _walk_skill_dirs(source_root):
+            skill_md = skill_root / "SKILL.md"
+            try:
+                logical_name = parse_skill_name(skill_md)
+                resolved = skill_root.resolve()
+            except OSError:
+                continue
+            alias = skill_alias_for_install_root(logical_name)
+            if not alias:
+                raise ValueError(f"Could not derive install alias for {skill_md}")
+
+            if excluded_root is not None and resolved == excluded_root / alias:
+                continue
+
+            resolved_str = str(resolved)
+            if resolved_str in seen_resolved:
+                continue
+            seen_resolved.add(resolved_str)
+
+            content_hash = file_hash(skill_md)
+            previous = by_alias.get(alias)
+            if previous and previous[0] != resolved_str:
+                previous_hash = file_hash(Path(previous[0]) / "SKILL.md")
+                if previous_hash != content_hash:
+                    conflicts.append(f"{alias}: {previous[0]} vs {resolved_str}")
+                    continue
+            if previous is None:
+                by_alias[alias] = (resolved_str, logical_name)
+
+    if conflicts:
+        raise ValueError("Conflicting skill aliases:\n" + "\n".join(conflicts))
+    return {alias: value for alias, (value, _logical) in sorted(by_alias.items())}
+
+
+def default_sync_discover_sources(include_global_sources: bool) -> List[Path]:
+    cwd = Path.cwd()
+    sources = [
+        cwd / ".agents" / "skills",
+        cwd / ".cursor" / "skills",
+        cwd / ".claude" / "skills",
+    ]
+    if include_global_sources:
+        home = Path("~").expanduser()
+        sources.extend([
+            home / ".cursor" / "skills",
+            home / ".claude" / "skills",
+        ])
+    return sources
+
+
 def plan_sync(
     skills_dir: Path,
     mapping: Dict[str, str],
@@ -1592,6 +1717,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_sync.add_argument("--apply", action="store_true", help="Apply actions (default is dry-run)")
 
+    p_sync_discover = sub.add_parser(
+        "sync-discover",
+        help="Discover SKILL.md sources and sync them into one or more install roots",
+    )
+    p_sync_discover.add_argument(
+        "--skills-dir",
+        action="append",
+        dest="skills_dirs",
+        metavar="DIR",
+        help="Target skill root. Repeat for multiple. Default: ~/.cursor/skills",
+    )
+    p_sync_discover.add_argument(
+        "--source",
+        action="append",
+        default=[],
+        help=(
+            "Source root to scan recursively for SKILL.md. Repeatable. "
+            "If omitted, scans .agents/skills, .cursor/skills, and .claude/skills under cwd."
+        ),
+    )
+    p_sync_discover.add_argument(
+        "--include-global-sources",
+        action="store_true",
+        help="Also append ~/.cursor/skills and ~/.claude/skills as source roots.",
+    )
+    p_sync_discover.add_argument(
+        "--apply", action="store_true", help="Apply actions (default is dry-run)"
+    )
+
     p_dedup = sub.add_parser(
         "dedup",
         help="Detect duplicate frontmatter names and replace copies with symlinks to the canonical file",
@@ -1753,6 +1907,27 @@ def main() -> int:
                 target_platform=args.target_platform,
                 source_specs=sync_specs,
             )
+            print_plan(actions, args.apply)
+            if args.apply:
+                apply_actions(skills_dir, actions)
+        if args.apply:
+            print("\nApplied actions. Re-run audit to verify final state.")
+        return 0
+
+    if args.command == "sync-discover":
+        sources = (
+            [Path(s).expanduser() for s in args.source]
+            if args.source
+            else default_sync_discover_sources(args.include_global_sources)
+        )
+        roots = resolve_skills_dirs(args.skills_dirs)
+        for idx, skills_dir in enumerate(roots):
+            if idx > 0:
+                print()
+            print(f"skills-dir: {skills_dir}")
+            mapping = discover_sync_mapping(sources, exclude_target_root=skills_dir)
+            print(f"discovered: {len(mapping)} sync entr{'y' if len(mapping) == 1 else 'ies'}")
+            actions = plan_sync(skills_dir, mapping)
             print_plan(actions, args.apply)
             if args.apply:
                 apply_actions(skills_dir, actions)
