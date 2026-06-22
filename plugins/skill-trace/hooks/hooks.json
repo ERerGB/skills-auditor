@@ -1,0 +1,46 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/j.z/code/skills-auditor/scripts/sensor_hook.py --provider codex"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/j.z/code/skills-auditor/scripts/sensor_hook.py --provider codex"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/j.z/code/skills-auditor/scripts/sensor_hook.py --provider codex"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/j.z/code/skills-auditor/scripts/sensor_hook.py --provider codex"
+          }
+        ]
+      }
+    ]
+  }
+}

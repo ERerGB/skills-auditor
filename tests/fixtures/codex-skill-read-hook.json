@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "sess-dry-run",
+  "cwd": "/Users/j.z/code/skills-auditor",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/Users/me/.codex/skills/foo/SKILL.md"
+  }
+}

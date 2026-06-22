@@ -114,8 +114,25 @@ class MetadataFinding:
     message: str
 
 
+@dataclass
+class MetadataRepairAction:
+    skill_md_path: str
+    action: str  # repair | skip
+    reason: str
+    codes: List[str]
+
+
 _SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 _FRONTMATTER_SCALAR_RE = re.compile(r"^([^:#][^:]*):\s*(.*)$")
+_AUTO_REPAIR_METADATA_CODES = frozenset(
+    {
+        "missing_frontmatter",
+        "missing_name",
+        "missing_description",
+        "invalid_name",
+        "unsafe_plain_scalar",
+    }
+)
 
 
 def _git(args: List[str], cwd: Path) -> Optional[str]:
@@ -291,11 +308,25 @@ def _extract_frontmatter(text: str) -> Tuple[Optional[List[str]], Optional[str]]
     return None, "unclosed_frontmatter"
 
 
+def _frontmatter_end_index(lines: List[str]) -> Optional[int]:
+    if not lines or lines[0].strip() != "---":
+        return None
+    for idx, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            return idx
+    return None
+
+
 def _clean_frontmatter_value(value: str) -> str:
     value = value.strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1].strip()
     return value
+
+
+def _frontmatter_value_is_quoted(value: str) -> bool:
+    value = value.strip()
+    return len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}
 
 
 def _parse_frontmatter_scalars(
@@ -330,7 +361,21 @@ def _parse_frontmatter_scalars(
             continue
 
         key = match.group(1).strip()
-        value = _clean_frontmatter_value(match.group(2))
+        raw_value = match.group(2).strip()
+        value = _clean_frontmatter_value(raw_value)
+        if (
+            raw_value not in {">", "|", ">-", "|-"}
+            and not _frontmatter_value_is_quoted(raw_value)
+            and ": " in raw_value
+        ):
+            findings.append(
+                MetadataFinding(
+                    str(skill_md),
+                    "error",
+                    "unsafe_plain_scalar",
+                    f"line {lineno}: quote `{key}` or use a block scalar because the value contains `: `",
+                )
+            )
         if key in fields:
             findings.append(
                 MetadataFinding(
@@ -389,17 +434,206 @@ def validate_skill_metadata(skill_md: Path, platform: str = "codex") -> List[Met
     return findings
 
 
+def _metadata_name_for(skill_md: Path) -> str:
+    name = skill_md.parent.name.strip()
+    sanitized = re.sub(r"[^A-Za-z0-9._/-]+", "-", name).strip("-._/")
+    if not sanitized or not sanitized[0].isalnum():
+        sanitized = f"skill-{sanitized}".strip("-")
+    return sanitized or "skill"
+
+
+def _metadata_description_for(skill_md: Path, text: str, name: str) -> str:
+    in_code = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code or not line:
+            continue
+        if line == "---" or line.startswith("|"):
+            continue
+        if line.startswith("#"):
+            continue
+        if line.startswith(("-", "*")):
+            line = line[1:].strip()
+        line = re.sub(r"`([^`]+)`", r"\1", line)
+        line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
+        line = re.sub(r"\s+", " ", line).strip()
+        if line:
+            return line[:240]
+    return f"Skill instructions for {name}."
+
+
+def _metadata_description_lines(description: str) -> List[str]:
+    return ["description: >", f"  {description}"]
+
+
+def _frontmatter_scalar_value(text: str, key: str) -> Optional[str]:
+    lines, frontmatter_error = _extract_frontmatter(text)
+    if frontmatter_error or lines is None:
+        return None
+    pattern = re.compile(rf"^{re.escape(key)}\s*:\s*(.*)$")
+    for line in lines:
+        match = pattern.match(line)
+        if match:
+            value = match.group(1).strip()
+            if value in {">", "|", ">-", "|-"}:
+                return None
+            return _clean_frontmatter_value(value)
+    return None
+
+
+def repair_skill_metadata(
+    skill_md: Path,
+    platform: str = "codex",
+    apply: bool = False,
+) -> List[MetadataRepairAction]:
+    findings = validate_skill_metadata(skill_md, platform=platform)
+    if not findings:
+        return []
+
+    codes = [f.code for f in findings]
+    unsupported = [c for c in codes if c not in _AUTO_REPAIR_METADATA_CODES]
+    if unsupported:
+        return [
+            MetadataRepairAction(
+                str(skill_md),
+                "skip",
+                "metadata findings require manual repair",
+                codes,
+            )
+        ]
+
+    text = skill_md.read_text(encoding="utf-8", errors="replace")
+    name = _metadata_name_for(skill_md)
+    description = (
+        _frontmatter_scalar_value(text, "description")
+        if "unsafe_plain_scalar" in codes
+        else None
+    ) or _metadata_description_for(skill_md, text, name)
+
+    if "missing_frontmatter" in codes:
+        new_text = (
+            "---\n"
+            f"name: {name}\n"
+            + "\n".join(_metadata_description_lines(description))
+            + "\n"
+            "---\n\n"
+            f"{text}"
+        )
+    else:
+        lines = text.splitlines()
+        end_idx = _frontmatter_end_index(lines)
+        if end_idx is None:
+            return [
+                MetadataRepairAction(
+                    str(skill_md),
+                    "skip",
+                    "frontmatter block is not safely editable",
+                    codes,
+                )
+            ]
+
+        frontmatter = lines[: end_idx + 1]
+        body = lines[end_idx + 1 :]
+
+        if "invalid_name" in codes:
+            for idx in range(1, end_idx):
+                if re.match(r"^name\s*:", frontmatter[idx]):
+                    frontmatter[idx] = f"name: {name}"
+                    break
+        if "unsafe_plain_scalar" in codes:
+            for idx in range(1, len(frontmatter) - 1):
+                if re.match(r"^description\s*:", frontmatter[idx]):
+                    frontmatter[idx: idx + 1] = _metadata_description_lines(description)
+                    end_idx += 1
+                    break
+        if "missing_name" in codes:
+            frontmatter.insert(1, f"name: {name}")
+            end_idx += 1
+        if platform == "codex" and "missing_description" in codes:
+            frontmatter[end_idx:end_idx] = _metadata_description_lines(description)
+
+        new_text = "\n".join(frontmatter + body)
+        if text.endswith("\n"):
+            new_text += "\n"
+
+    if apply:
+        skill_md.write_text(new_text, encoding="utf-8")
+
+    return [
+        MetadataRepairAction(
+            str(skill_md),
+            "repair",
+            "added or normalized Codex frontmatter metadata",
+            codes,
+        )
+    ]
+
+
 def collect_metadata_findings(skills_dir: Path, platform: str = "codex") -> List[MetadataFinding]:
     findings: List[MetadataFinding] = []
-    if not skills_dir.exists() or not skills_dir.is_dir():
-        return findings
-    for skill_md in sorted(skills_dir.rglob("SKILL.md"), key=lambda p: str(p).lower()):
-        if _skill_md_path_is_under_ignored_segment(skill_md):
-            continue
-        if not _skill_md_under_visible_install_tree(skill_md, skills_dir):
-            continue
+    for skill_md in iter_visible_skill_mds(skills_dir):
         findings.extend(validate_skill_metadata(skill_md, platform=platform))
     return findings
+
+
+def collect_metadata_repair_actions(
+    skills_dir: Path,
+    platform: str = "codex",
+    apply: bool = False,
+) -> List[MetadataRepairAction]:
+    actions: List[MetadataRepairAction] = []
+    for skill_md in iter_visible_skill_mds(skills_dir):
+        actions.extend(repair_skill_metadata(skill_md, platform=platform, apply=apply))
+    return actions
+
+
+def iter_visible_skill_mds(skills_dir: Path) -> List[Path]:
+    """Return visible SKILL.md files, following top-level skill symlinks.
+
+    ``Path.rglob`` does not descend into symlinked directories on common Python builds,
+    but Codex/Cursor install roots often expose skills as top-level symlinks. This
+    function treats those symlinks as visible install entries and scans their resolved
+    targets while preserving the historical top-level hidden-directory exclusion.
+    """
+    if not skills_dir.exists() or not skills_dir.is_dir():
+        return []
+
+    roots: List[Path] = []
+    own_skill_md = skills_dir / "SKILL.md"
+    if own_skill_md.exists():
+        roots.append(skills_dir)
+
+    for child in sorted(skills_dir.iterdir(), key=lambda p: p.name.lower()):
+        if child.name.startswith("."):
+            continue
+        if child.is_symlink():
+            try:
+                resolved = child.resolve()
+            except OSError:
+                continue
+            if resolved.is_dir():
+                roots.append(resolved)
+        elif child.is_dir():
+            roots.append(child)
+
+    out: List[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        for skill_md in sorted(root.rglob("SKILL.md"), key=lambda p: str(p).lower()):
+            if _skill_md_path_is_under_ignored_segment(skill_md):
+                continue
+            try:
+                key = str(skill_md.resolve())
+            except OSError:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(skill_md)
+    return out
 
 
 # When scanning a skill pack for duplicate frontmatter names, skip these path segments.
@@ -573,6 +807,51 @@ def print_metadata_check(
                 "skills_dir": str(skills_dir),
                 "platform": platform,
                 "findings": [asdict(f) for f in findings],
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+
+
+def print_metadata_repair(
+    skills_dir: Path,
+    actions: List[MetadataRepairAction],
+    platform: str,
+    apply: bool,
+) -> None:
+    mode = "APPLY" if apply else "DRY-RUN"
+    print(f"\nmetadata-repair mode: {mode} (platform={platform})")
+    if not actions:
+        print(f"status: ok (no metadata repairs needed under {skills_dir})")
+        print("\njson:")
+        print(
+            json.dumps(
+                {
+                    "skills_dir": str(skills_dir),
+                    "platform": platform,
+                    "mode": mode.lower(),
+                    "actions": [],
+                },
+                indent=2,
+            )
+        )
+        return
+
+    repairs = [a for a in actions if a.action == "repair"]
+    skips = [a for a in actions if a.action == "skip"]
+    print(f"planned: {len(repairs)} repair(s), {len(skips)} skip(s)")
+    print("action\tpath\tcodes\treason")
+    for a in actions:
+        print(f"{a.action}\t{a.skill_md_path}\t{','.join(a.codes)}\t{a.reason}")
+    print("\njson:")
+    print(
+        json.dumps(
+            {
+                "skills_dir": str(skills_dir),
+                "platform": platform,
+                "mode": mode.lower(),
+                "actions": [asdict(a) for a in actions],
             },
             indent=2,
             ensure_ascii=False,
@@ -1894,6 +2173,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exit with code 5 if invalid frontmatter metadata is found.",
     )
 
+    p_metadata_repair = sub.add_parser(
+        "metadata-repair",
+        help="Plan or apply safe, idempotent SKILL.md frontmatter metadata repairs",
+    )
+    p_metadata_repair.add_argument(
+        "--skills-dir",
+        action="append",
+        dest="skills_dirs",
+        metavar="DIR",
+        help="Skill root (repeat for multiple). Default: ~/.cursor/skills",
+    )
+    p_metadata_repair.add_argument(
+        "--platform",
+        default="codex",
+        help="Metadata validation platform profile (default: codex).",
+    )
+    p_metadata_repair.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply metadata repairs (default is dry-run).",
+    )
+
     p_drift = sub.add_parser("drift-check", help="Check git sync status for symlinked skills")
     p_drift.add_argument(
         "--skills-dir",
@@ -2008,6 +2309,165 @@ def build_parser() -> argparse.ArgumentParser:
         help="Trace directory to audit (default: ~/.skills-auditor/traces/).",
     )
 
+    p_record_trigger = sub.add_parser(
+        "record-trigger-log",
+        help="Append a local JSONL trigger/observability log event",
+    )
+    p_record_trigger.add_argument(
+        "--kind",
+        default="skill-trigger",
+        choices=["skill-trigger", "observability-trigger", "trace"],
+        help="Event kind to record (default: skill-trigger).",
+    )
+    p_record_trigger.add_argument(
+        "--log-dir",
+        default=".skills-auditor-local",
+        help="Local log root (default: .skills-auditor-local).",
+    )
+    p_record_trigger.add_argument("--source", default="manual", help="Producer name.")
+    p_record_trigger.add_argument("--prompt-id", default="", help="Stable prompt/case id.")
+    p_record_trigger.add_argument("--prompt-hash", default="", help="Hash of the prompt, not raw text.")
+    p_record_trigger.add_argument("--prompt-summary", default="", help="Privacy-preserving prompt summary.")
+    p_record_trigger.add_argument("--context-summary", default="", help="Recent context summary.")
+    p_record_trigger.add_argument("--skill", default="", help="Skill involved in the event.")
+    p_record_trigger.add_argument("--expected-skill", default="", help="Expected skill label.")
+    p_record_trigger.add_argument("--actual-skill", default="", help="Observed skill label.")
+    p_record_trigger.add_argument("--expected-mode", default="", help="Expected mode label.")
+    p_record_trigger.add_argument("--actual-mode", default="", help="Observed mode label.")
+    p_record_trigger.add_argument("--decision", default="", help="Routing/trigger decision.")
+    p_record_trigger.add_argument("--confidence", type=float, default=None, help="Optional confidence score.")
+    p_record_trigger.add_argument(
+        "--verdict",
+        default="unknown",
+        help="Regression verdict: correct, incorrect, false-positive, false-negative, ambiguous, unknown.",
+    )
+    p_record_trigger.add_argument("--trace-path", default="", help="Referenced state-machine trace path.")
+    p_record_trigger.add_argument("--notes", default="", help="Short operator note.")
+
+    p_record_sensor = sub.add_parser(
+        "record-sensor-event",
+        help="Normalize one agent hook/transcript JSON payload into the local sensor log",
+    )
+    p_record_sensor.add_argument(
+        "--provider",
+        required=True,
+        help="Agent/runtime provider label, e.g. claude-code, codex, cursor, generic.",
+    )
+    p_record_sensor.add_argument(
+        "--source",
+        default="hook",
+        help="Sensor source type, e.g. hook, transcript, fs-proxy (default: hook).",
+    )
+    p_record_sensor.add_argument(
+        "--log-dir",
+        default=".skills-auditor-local",
+        help="Local log root (default: .skills-auditor-local).",
+    )
+    p_record_sensor.add_argument(
+        "--input-file",
+        default="-",
+        help="JSON payload file. Use '-' to read stdin (default: -).",
+    )
+    p_record_sensor.add_argument(
+        "--resolve-path",
+        action="store_true",
+        help="Resolve an observed access path to realpath when it exists.",
+    )
+    p_record_sensor.add_argument(
+        "--hash-path",
+        action="store_true",
+        help="Hash the observed file path when it exists and is a regular file.",
+    )
+
+    p_audit_trigger_logs = sub.add_parser(
+        "audit-trigger-logs",
+        help="Validate local trigger/observability logs and print regression counters",
+    )
+    p_audit_trigger_logs.add_argument(
+        "--log-dir",
+        default=".skills-auditor-local",
+        help="Local log root (default: .skills-auditor-local).",
+    )
+    p_audit_trigger_logs.add_argument(
+        "--kind",
+        default="",
+        choices=["", "skill-trigger", "observability-trigger", "trace"],
+        help="Optional event kind filter.",
+    )
+    p_audit_trigger_logs.add_argument(
+        "--fail-on-error",
+        action="store_true",
+        help="Exit non-zero when log validation has errors.",
+    )
+
+    p_audit_sensor_logs = sub.add_parser(
+        "audit-sensor-logs",
+        help="Validate local agent sensor logs and print basic counters",
+    )
+    p_audit_sensor_logs.add_argument(
+        "--log-dir",
+        default=".skills-auditor-local",
+        help="Local log root (default: .skills-auditor-local).",
+    )
+    p_audit_sensor_logs.add_argument(
+        "--provider",
+        default="",
+        help="Optional provider filter, e.g. claude-code or codex.",
+    )
+    p_audit_sensor_logs.add_argument(
+        "--fail-on-error",
+        action="store_true",
+        help="Exit non-zero when log validation has errors.",
+    )
+
+    p_aggregate_sensor_claims = sub.add_parser(
+        "aggregate-sensor-claims",
+        help="Dry-run aggregate local sensor events into confidence-rated claims",
+    )
+    p_aggregate_sensor_claims.add_argument(
+        "--log-dir",
+        default=".skills-auditor-local",
+        help="Local log root (default: .skills-auditor-local).",
+    )
+    p_aggregate_sensor_claims.add_argument(
+        "--provider",
+        default="",
+        help="Optional provider filter, e.g. claude-code or codex.",
+    )
+
+    p_log_stats = sub.add_parser(
+        "log-stats",
+        help="Summarize local trigger logs and route traces storage usage",
+    )
+    p_log_stats.add_argument(
+        "--log-dir",
+        default=".skills-auditor-local",
+        help="Local trigger log root (default: .skills-auditor-local).",
+    )
+    p_log_stats.add_argument(
+        "--trace-dir",
+        default="",
+        help="Route trace directory (default: ~/.skills-auditor/traces/).",
+    )
+    p_log_stats.add_argument(
+        "--events-per-day",
+        type=float,
+        default=0.0,
+        help="Optional planning input for storage estimate.",
+    )
+    p_log_stats.add_argument(
+        "--retention-days",
+        type=int,
+        default=30,
+        help="Retention window for estimate (default: 30).",
+    )
+    p_log_stats.add_argument(
+        "--index-multiplier",
+        type=float,
+        default=0.1,
+        help="Index/summary overhead as a fraction of raw logs (default: 0.1).",
+    )
+
     p_discovery = sub.add_parser(
         "audit-discovery",
         help="Audit discovery-layer collisions and canonical skill selection",
@@ -2102,6 +2562,29 @@ def main() -> int:
                 metadata_exit = True
         if args.fail_on_invalid and metadata_exit:
             return 5
+        return 0
+
+    if args.command == "metadata-repair":
+        needs_apply = False
+        skipped = False
+        for idx, skills_dir in enumerate(resolve_skills_dirs(args.skills_dirs)):
+            if idx > 0:
+                print()
+            print(f"skills-dir: {skills_dir}")
+            actions = collect_metadata_repair_actions(
+                skills_dir,
+                platform=args.platform,
+                apply=args.apply,
+            )
+            print_metadata_repair(skills_dir, actions, args.platform, args.apply)
+            if any(a.action == "repair" for a in actions):
+                needs_apply = True
+            if any(a.action == "skip" for a in actions):
+                skipped = True
+        if skipped:
+            return 5
+        if needs_apply and not args.apply:
+            return 1
         return 0
 
     if args.command == "drift-check":
@@ -2231,6 +2714,266 @@ def main() -> int:
         ))
         return 1 if errors else 0
 
+    if args.command == "record-trigger-log":
+        from skills_auditor.observability import TriggerLogEvent, write_trigger_log
+
+        event = TriggerLogEvent(
+            kind=args.kind,
+            source=args.source,
+            prompt_id=args.prompt_id,
+            prompt_hash=args.prompt_hash,
+            prompt_summary=args.prompt_summary,
+            context_summary=args.context_summary,
+            skill=args.skill,
+            expected_skill=args.expected_skill,
+            actual_skill=args.actual_skill,
+            expected_mode=args.expected_mode,
+            actual_mode=args.actual_mode,
+            decision=args.decision,
+            confidence=args.confidence,
+            verdict=args.verdict,
+            trace_path=args.trace_path,
+            notes=args.notes,
+        )
+        out = write_trigger_log(event, Path(args.log_dir).expanduser())
+        print(f"log written: {out}")
+        print("\njson:")
+        print(json.dumps(event.to_dict(), indent=2, ensure_ascii=False))
+        return 0
+
+    if args.command == "record-sensor-event":
+        from skills_auditor.observability import sensor_event_from_payload, write_sensor_event
+
+        if args.input_file == "-":
+            raw = sys.stdin.read()
+        else:
+            raw = Path(args.input_file).expanduser().read_text(encoding="utf-8")
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            print("sensor payload must be a JSON object", file=sys.stderr)
+            return 2
+        event = sensor_event_from_payload(
+            payload,
+            provider=args.provider,
+            source=args.source,
+            resolve_path=args.resolve_path,
+            hash_path=args.hash_path,
+        )
+        out = write_sensor_event(event, Path(args.log_dir).expanduser())
+        print(f"sensor log written: {out}")
+        print("\njson:")
+        print(json.dumps(event.to_dict(), indent=2, ensure_ascii=False))
+        return 0
+
+    if args.command == "audit-trigger-logs":
+        from skills_auditor.observability import (
+            audit_trigger_logs,
+            load_trigger_logs,
+            summarize_trigger_logs,
+        )
+
+        events, parse_findings = load_trigger_logs(
+            Path(args.log_dir).expanduser(),
+            kind=args.kind,
+        )
+        findings = parse_findings + audit_trigger_logs(events)
+        summary = summarize_trigger_logs(events)
+        print(f"events analyzed: {summary.total_events}")
+        print(f"findings: {len(findings)}")
+        errors = [f for f in findings if f.severity == "error"]
+        warnings = [f for f in findings if f.severity == "warning"]
+        infos = [f for f in findings if f.severity == "info"]
+        print(f"  errors: {len(errors)}, warnings: {len(warnings)}, info: {len(infos)}")
+        if summary.labeled_events:
+            print(f"  labeled accuracy: {summary.accuracy:.3f}")
+            print(
+                "  false positives: "
+                f"{summary.false_positive_events}, false negatives: {summary.false_negative_events}"
+            )
+        print(f"  by kind: {summary.by_kind}")
+        print(f"  by verdict: {summary.by_verdict}")
+        for f in findings:
+            prefix = {"error": "ERR", "warning": "WARN", "info": "INFO"}.get(f.severity, "?")
+            parts = [f"[{prefix}] {f.check}: {f.detail}"]
+            if f.event_id:
+                parts.append(f"event={f.event_id}")
+            if f.path:
+                parts.append(f"path={f.path}")
+            print("  " + "  ".join(parts))
+        print("\njson:")
+        print(json.dumps(
+            {
+                "summary": asdict(summary),
+                "findings": [asdict(f) for f in findings],
+            },
+            indent=2,
+            ensure_ascii=False,
+        ))
+        return 1 if args.fail_on_error and errors else 0
+
+    if args.command == "audit-sensor-logs":
+        from skills_auditor.observability import audit_sensor_events, load_sensor_events
+
+        events, parse_findings = load_sensor_events(
+            Path(args.log_dir).expanduser(),
+            provider=args.provider,
+        )
+        findings = parse_findings + audit_sensor_events(events)
+        by_provider: Dict[str, int] = {}
+        by_type: Dict[str, int] = {}
+        skill_accesses = 0
+        for event in events:
+            provider = str(event.get("provider", "") or "unknown")
+            event_type = str(event.get("event_type", "") or "unknown")
+            by_provider[provider] = by_provider.get(provider, 0) + 1
+            by_type[event_type] = by_type.get(event_type, 0) + 1
+            if event_type == "skill_file_access":
+                skill_accesses += 1
+        print(f"sensor events analyzed: {len(events)}")
+        print(f"findings: {len(findings)}")
+        errors = [f for f in findings if f.severity == "error"]
+        warnings = [f for f in findings if f.severity == "warning"]
+        infos = [f for f in findings if f.severity == "info"]
+        print(f"  errors: {len(errors)}, warnings: {len(warnings)}, info: {len(infos)}")
+        print(f"  skill file accesses: {skill_accesses}")
+        print(f"  by provider: {by_provider}")
+        print(f"  by event type: {by_type}")
+        for f in findings:
+            prefix = {"error": "ERR", "warning": "WARN", "info": "INFO"}.get(f.severity, "?")
+            parts = [f"[{prefix}] {f.check}: {f.detail}"]
+            if f.event_id:
+                parts.append(f"event={f.event_id}")
+            if f.path:
+                parts.append(f"path={f.path}")
+            print("  " + "  ".join(parts))
+        print("\njson:")
+        print(json.dumps(
+            {
+                "summary": {
+                    "total_events": len(events),
+                    "skill_file_accesses": skill_accesses,
+                    "by_provider": by_provider,
+                    "by_event_type": by_type,
+                },
+                "findings": [asdict(f) for f in findings],
+            },
+            indent=2,
+            ensure_ascii=False,
+        ))
+        return 1 if args.fail_on_error and errors else 0
+
+    if args.command == "aggregate-sensor-claims":
+        from skills_auditor.observability import aggregate_sensor_claims, load_sensor_events
+
+        events, parse_findings = load_sensor_events(
+            Path(args.log_dir).expanduser(),
+            provider=args.provider,
+        )
+        claims = aggregate_sensor_claims(events)
+        by_confidence: Dict[str, int] = {}
+        by_status: Dict[str, int] = {}
+        for claim in claims:
+            by_confidence[claim.confidence] = by_confidence.get(claim.confidence, 0) + 1
+            by_status[claim.status] = by_status.get(claim.status, 0) + 1
+        print(f"sensor events analyzed: {len(events)}")
+        print(f"parse findings: {len(parse_findings)}")
+        print(f"claims: {len(claims)}")
+        print(f"  by confidence: {by_confidence}")
+        print(f"  by status: {by_status}")
+        for finding in parse_findings:
+            print(f"  [ERR] {finding.check}: {finding.detail}")
+        for claim in claims:
+            print(
+                "  "
+                f"{claim.confidence}\t{claim.claim_type}\t{claim.provider}\t"
+                f"{claim.operation}\t{claim.skill_name or '-'}\t{claim.path or '-'}"
+            )
+        print("\njson:")
+        print(json.dumps(
+            {
+                "summary": {
+                    "sensor_events": len(events),
+                    "parse_findings": len(parse_findings),
+                    "claims": len(claims),
+                    "by_confidence": by_confidence,
+                    "by_status": by_status,
+                },
+                "claims": [claim.to_dict() for claim in claims],
+                "findings": [asdict(finding) for finding in parse_findings],
+            },
+            indent=2,
+            ensure_ascii=False,
+        ))
+        return 1 if parse_findings else 0
+
+    if args.command == "log-stats":
+        from skills_auditor.observability import collect_storage_stats, estimate_retention_bytes
+        from skills_auditor.state_machine import TRACE_DIR
+
+        log_dir = Path(args.log_dir).expanduser()
+        trace_dir = Path(args.trace_dir).expanduser() if args.trace_dir else TRACE_DIR
+        stats = collect_storage_stats(
+            [
+                ("trigger_logs", log_dir / "logs"),
+                ("sensor_logs", log_dir / "sensors"),
+                ("route_traces", trace_dir),
+            ]
+        )
+        total_bytes = sum(s.total_bytes for s in stats)
+        total_records = sum(s.record_count for s in stats)
+        average_record_bytes = (total_bytes / total_records) if total_records else 0.0
+        print("storage scopes:")
+        for s in stats:
+            print(
+                f"  {s.label}: path={s.path} exists={s.exists} files={s.file_count} "
+                f"records={s.record_count} bytes={s.total_bytes} "
+                f"avg_record_bytes={s.average_record_bytes:.1f}"
+            )
+        print(f"\ntotal bytes: {total_bytes}")
+        print(f"total records: {total_records}")
+        print(f"observed average record bytes: {average_record_bytes:.1f}")
+        print("\nformula:")
+        print(
+            "  storage_bytes ~= events_per_day * retention_days * "
+            "average_record_bytes * (1 + index_multiplier)"
+        )
+        print(
+            "  compute_seconds ~= events * (parse_seconds + regression_seconds + "
+            "optional_llm_judge_seconds)"
+        )
+        if args.events_per_day:
+            estimated = estimate_retention_bytes(
+                average_record_bytes,
+                args.events_per_day,
+                args.retention_days,
+                args.index_multiplier,
+            )
+            print(
+                "\nestimate: "
+                f"{estimated:.1f} bytes for {args.events_per_day:g} events/day, "
+                f"{args.retention_days} days, index_multiplier={args.index_multiplier:g}"
+            )
+        print("\njson:")
+        print(json.dumps(
+            {
+                "scopes": [asdict(s) for s in stats],
+                "total_bytes": total_bytes,
+                "total_records": total_records,
+                "average_record_bytes": average_record_bytes,
+                "storage_formula": (
+                    "events_per_day * retention_days * average_record_bytes * "
+                    "(1 + index_multiplier)"
+                ),
+                "compute_formula": (
+                    "events * (parse_seconds + regression_seconds + "
+                    "optional_llm_judge_seconds)"
+                ),
+            },
+            indent=2,
+            ensure_ascii=False,
+        ))
+        return 0
+
     if args.command == "audit-discovery":
         profile: Dict[str, object] = {}
         profile_excluded: List[Path] = []
@@ -2292,3 +3035,7 @@ def main() -> int:
 
     parser.print_help()
     return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

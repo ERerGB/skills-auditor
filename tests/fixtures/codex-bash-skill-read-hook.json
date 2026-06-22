@@ -1,0 +1,10 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "sess-codex-bash-read",
+  "cwd": "/Users/j.z/code/skills-auditor",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "sed -n '1,40p' /Users/j.z/code/skills-auditor/plugins/skill-trace/skills/skill-trace/SKILL.md"
+  },
+  "transcript_path": "/Users/j.z/.codex/sessions/2026/06/22/rollout-example.jsonl"
+}

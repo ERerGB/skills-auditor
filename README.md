@@ -25,7 +25,11 @@ This repo provides a safe workflow:
 - Detect symlink health (`ok` / `broken`)
 - Detect folder mode (`symlink` / `directory` / `file`)
 - Audit discovery-layer collisions across multiple sources
-- Validate `SKILL.md` frontmatter metadata by default, including Codex-ready `name` + `description`
+- Validate `SKILL.md` frontmatter metadata by default, including Codex-ready `name` + `description`, following top-level symlinked skills in install roots
+- Repair safe metadata problems idempotently with `metadata-repair` (`--apply` writes; dry-run reports pending repairs)
+- Record local, gitignored trigger, observability, and agent sensor logs for prompt-level routing review
+- Summarize local log and route trace storage usage with retention planning formulas
+- Treat regression runners as adapters; Promptfoo is the first target for skill-trigger evals
 - **Platform-tagged discovery profiles** (`cursor`, `claude-code`, or `*`): see below
 - Build canonical injection preview with source priority (includes per-source platforms)
 - Sync selected skills to canonical sources via mapping file
@@ -173,8 +177,10 @@ Use `--apply` to execute changes.
 
 Validate `SKILL.md` frontmatter under one or more install roots. `audit` runs this check by
 default for every `SKILL.md` in each install root and exits with code **5** on invalid
-metadata unless `--allow-invalid-metadata` is passed. The default platform profile is `codex`,
-which requires a fenced frontmatter block with non-empty `name` and `description` fields.
+metadata unless `--allow-invalid-metadata` is passed. The scan follows top-level skill
+symlinks, so a root like `~/.codex/skills` validates the real symlink targets. The default
+platform profile is `codex`, which requires a fenced frontmatter block with non-empty `name`
+and `description` fields.
 
 ```bash
 skills-audit metadata \
@@ -189,6 +195,32 @@ skills-audit audit \
 skills-audit audit \
   --skills-dir "$HOME/.codex/skills" \
   --skip-metadata-check
+```
+
+### `metadata-repair`
+
+Plan or apply safe, idempotent frontmatter repairs. The command can automatically:
+
+- prepend missing frontmatter with `name` inferred from the skill folder and `description`
+  inferred from the first body paragraph,
+- add missing `name` or `description` fields to an existing frontmatter block,
+- normalize an invalid `name` to the folder-derived skill name,
+- rewrite YAML-unsafe plain scalars, such as unquoted `description` values containing `: `,
+  as block scalars.
+
+Malformed or duplicate-key frontmatter is reported as `skip` for manual repair. Dry-run exits
+with code **1** when repairs are pending; skipped repairs exit with code **5**. `--apply` writes
+the changes and subsequent runs should report no actions.
+
+```bash
+skills-audit metadata-repair \
+  --platform codex \
+  --skills-dir "$HOME/.codex/skills"
+
+skills-audit metadata-repair \
+  --platform codex \
+  --skills-dir "$HOME/.codex/skills" \
+  --apply
 ```
 
 **Platform-aware sync:** when you use the same map against both Cursor and Claude Code trees, pass the same discovery profile and `--target-platform cursor` or `claude-code`. Entries whose map target path falls under a profile source that does not list that platform are reported as `skip_platform` (no symlink changes).
@@ -430,6 +462,104 @@ skills-audit audit-state-machine --trace-dir ./my-traces
 ```
 
 Checks performed: illegal transitions, terminal state coverage, dead/unused states, signal coverage gaps, UNROUTABLE frequency, cross-run consistency (same skill selecting different variants across runs).
+
+## Trigger Observability Logs
+
+Route traces explain what happened inside Select-One Routing. Trigger observability logs sit one
+layer above that: they record whether a prompt should have triggered a skill, whether an
+observability hook should have fired, and which trace file should be reviewed later.
+The logs are the local ledger; external regression runners are integrated through adapters.
+Promptfoo is the first adapter target for skill-trigger evals.
+
+The default log root is repo-local and gitignored:
+
+```bash
+.skills-auditor-local/
+```
+
+Record a privacy-preserving skill trigger event:
+
+```bash
+skills-audit record-trigger-log \
+  --kind skill-trigger \
+  --prompt-hash "sha256:<prompt-hash>" \
+  --prompt-summary "<short privacy-preserving summary>" \
+  --expected-skill "<Skill>" \
+  --actual-skill "<Skill>" \
+  --verdict correct
+```
+
+Audit accumulated trigger logs:
+
+```bash
+skills-audit audit-trigger-logs --fail-on-error
+```
+
+The audit checks JSONL parseability, known event kinds, duplicate event ids, missing prompt
+references, missing skill references, missing trace references, and accidental `raw_prompt`
+storage. It also reports labeled accuracy plus false-positive / false-negative counts when
+events include regression verdicts.
+
+## Agent Sensor Logs
+
+Sensor logs are the lowest observability layer. They capture runtime facts exposed by an
+agent host through hooks or transcripts, such as tool name, session id, cwd, and file path.
+They do **not** prove semantic skill usage by themselves; the identity/alignment layer maps
+these path facts to canonical skills later.
+
+Record one Claude Code or Codex hook/transcript payload from stdin:
+
+```bash
+cat hook-payload.json | skills-audit record-sensor-event \
+  --provider claude-code \
+  --source hook
+```
+
+For a `Read` event pointing at `/Users/me/.codex/skills/foo/SKILL.md`, the normalized event
+is stored under:
+
+```text
+.skills-auditor-local/sensors/YYYY-MM-DD/claude-code.jsonl
+```
+
+and includes fields such as:
+
+```json
+{
+  "event_type": "skill_file_access",
+  "operation": "read",
+  "path": "/Users/me/.codex/skills/foo/SKILL.md",
+  "skill_name": "foo",
+  "provider": "claude-code"
+}
+```
+
+Audit accumulated sensor logs:
+
+```bash
+skills-audit audit-sensor-logs --fail-on-error
+```
+
+Use `--resolve-path` or `--hash-path` only when you intentionally want the sensor to inspect
+the observed local file. By default, the command only normalizes the payload it receives.
+
+Summarize storage usage and estimate retention:
+
+```bash
+skills-audit log-stats \
+  --events-per-day 100 \
+  --retention-days 30
+```
+
+Planning formulas:
+
+```text
+storage_bytes ~= events_per_day * retention_days * average_record_bytes * (1 + index_multiplier)
+compute_seconds ~= events * (parse_seconds + regression_seconds + optional_llm_judge_seconds)
+```
+
+See [`doc/trigger-observability-regression.md`](doc/trigger-observability-regression.md) for the
+current staged regression method.
 
 ## Isolation Harness Recommendations
 

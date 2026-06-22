@@ -14,17 +14,30 @@ description: >
 When the user invokes **`/skills-auditor`** or this skill **without** asking to stay read-only:
 
 1. Load optional config: if `SKILLS_AUDITOR_CONFIG` points to an env file, `source` it.
-2. If **`SKILLS_AUDITOR_MODE`** is unset or `full`, run **all** cycles in order. For **`dedup`**, **`route`**, and **`sync`**, pass **`--apply`** by default (mutating steps actually change disk).
+2. If **`SKILLS_AUDITOR_MODE`** is unset or `full`, run **all** cycles in order. For **`metadata-repair`**, **`dedup`**, **`route`**, and **`sync`**, pass **`--apply`** by default (mutating steps actually change disk).
 3. **Dry-run exception:** if the user **explicitly** asks for dry-run (e.g. “dry run”, “只预览”, “不要 apply”, “plan only”) **or** **`SKILLS_AUDITOR_DRY_RUN=1`**, then **omit** `--apply` on those commands.
 4. If **`SKILLS_AUDITOR_MODE`** is a single cycle name, run **only** that cycle (same apply vs dry-run rules).
 
 **Duplicate-name audit / dedup scope:** `skills-audit` treats each `--skills-dir` as one **install root** and scans **recursively** for colliding frontmatter `name:` (same scope Slash-style hosts use). That includes duplicates across sibling folders (for example `browse/` vs `gstack/browse/`), not only files nested inside the same top-level pack.
 
-**Metadata audit scope:** `audit` validates `SKILL.md` frontmatter by default for every visible skill under each `--skills-dir`. The default platform profile is `codex`; invalid metadata exits with code **5** unless `--allow-invalid-metadata` is passed. Use `--skip-metadata-check` only for narrow investigation runs.
+**Metadata audit scope:** `audit` validates `SKILL.md` frontmatter by default for every visible skill under each `--skills-dir`, including top-level symlinked skills. The default platform profile is `codex`; invalid metadata exits with code **5** unless `--allow-invalid-metadata` is passed. Use `--skip-metadata-check` only for narrow investigation runs.
+
+**Metadata repair:** run `skills-audit metadata-repair --platform codex --skills-dir <root> --apply` to safely and idempotently add missing Codex frontmatter (`name` + `description`), fill missing scalar fields, or rewrite YAML-unsafe plain scalars (for example unquoted `description` values containing `: `) as block scalars. Without `--apply`, it is a dry-run and exits **1** when repairs are pending. Unsupported malformed frontmatter is skipped and exits **5**.
 
 **Narrowing without env files:** “audit only” → discover only (never mutating). “dedup dry-run” → dedup without `--apply`. “route Codex” with no dry-run wording → route **with** `--apply` for that run.
 
 **Codex metadata check:** run `skills-audit metadata --platform codex --skills-dir <root> --fail-on-invalid` for a standalone validation pass. The Codex profile requires a fenced frontmatter block with non-empty `name` and `description`.
+
+**Trigger observability logs:** use `skills-audit record-trigger-log` to append repo-local,
+gitignored JSONL events under `.skills-auditor-local/`; use `skills-audit audit-trigger-logs`
+for schema/privacy/regression checks.
+
+**Agent sensor logs:** use `skills-audit record-sensor-event --provider <provider>` to normalize
+one hook/transcript JSON payload from stdin or `--input-file` into `.skills-auditor-local/sensors/`;
+use `skills-audit audit-sensor-logs` for schema/privacy checks. Sensor logs capture host-exposed
+facts such as tool name and file path; they do not by themselves prove semantic skill usage.
+
+Use `skills-audit log-stats` to summarize local log and route trace storage usage.
 
 ## Configuration (optional)
 
@@ -35,7 +48,7 @@ Template: [`config/skills-auditor.pipeline.example.env`](config/skills-auditor.p
 | `SKILLS_AUDITOR_ROOTS` | Space-separated skill roots → expand to repeated `--skills-dir` |
 | `SKILLS_AUDITOR_EXTRA_ROOTS` | Optional extra roots appended to the list |
 | `SKILLS_AUDITOR_WITH_DRIFT` | `1` → add `--with-drift` on discover + close audits |
-| `SKILLS_AUDITOR_MODE` | `full` (default) \| `discover` \| `dedup` \| `route` \| `traces` \| `sync` \| `close` |
+| `SKILLS_AUDITOR_MODE` | `full` (default) \| `metadata-repair` \| `discover` \| `dedup` \| `route` \| `traces` \| `sync` \| `close` |
 | `SKILLS_AUDITOR_ROUTE_PLATFORMS` | Comma-separated, e.g. `cursor,codex` |
 | `SKILLS_AUDITOR_ROUTE_STRATEGY` | `archive` (default) \| `delete` \| `keep` |
 | `SKILLS_AUDITOR_SYNC_MAP_FILE` | If non-empty, sync cycle runs with this `--map-file` |
@@ -63,6 +76,7 @@ Use `"${AUDIT_DIRS[@]}"` and `"${DRIFT_FLAG[@]}"` in `skills-audit` invocations.
 
 | Cycle | Sub-skill |
 | --- | --- |
+| 0 — Metadata repair | built into `skills-audit metadata-repair` |
 | 1 — Discover | [`skills/discover/SKILL.md`](skills/discover/SKILL.md) |
 | 2 — Dedup | [`skills/dedup/SKILL.md`](skills/dedup/SKILL.md) |
 | 3 — Route | [`skills/route/SKILL.md`](skills/route/SKILL.md) |
@@ -100,6 +114,14 @@ run_discover() {
 }
 run_close() { run_discover; }
 
+run_metadata_repair() {
+  if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" = "1" ]; then
+    skills-audit metadata-repair "${AUDIT_DIRS[@]}" --platform codex
+  else
+    skills-audit metadata-repair "${AUDIT_DIRS[@]}" --platform codex --apply
+  fi
+}
+
 run_dedup() {
   if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" = "1" ]; then
     skills-audit dedup "${AUDIT_DIRS[@]}"
@@ -133,6 +155,7 @@ run_route_all() {
 }
 
 case "$MODE" in
+  metadata-repair) run_metadata_repair ;;
   discover) run_discover ;;
   dedup)    run_dedup ;;
   route)    run_route_all ;;
@@ -140,6 +163,7 @@ case "$MODE" in
   sync)     run_sync ;;
   close)    run_close ;;
   full)
+    run_metadata_repair
     run_discover
     run_dedup
     run_route_all
@@ -157,7 +181,7 @@ esac
 
 ## Safety rules (this skill contract)
 
-- **`/skills-auditor` default:** `dedup`, `route`, and `sync` run with **`--apply`** when the user does **not** ask for dry-run.
+- **`/skills-auditor` default:** `metadata-repair`, `dedup`, `route`, and `sync` run with **`--apply`** when the user does **not** ask for dry-run.
 - **Opt out:** explicit “dry run” / “preview only” / **`SKILLS_AUDITOR_DRY_RUN=1`** → omit `--apply`.
 - **Destructive strategy:** `SKILLS_AUDITOR_ROUTE_STRATEGY=delete` removes files; only use when the operator is explicit.
 

@@ -4,6 +4,7 @@ __pycache__/
 dist/
 build/
 .venv/
+.skills-auditor-local/
 *.pyc
 *.pyo
 *.pyd
