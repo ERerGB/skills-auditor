@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 /Users/j.z/code/skills-auditor/scripts/sensor_hook.py --provider codex"
+            "command": "python3 scripts/sensor_hook.py --provider codex"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 /Users/j.z/code/skills-auditor/scripts/sensor_hook.py --provider codex"
+            "command": "python3 scripts/sensor_hook.py --provider codex"
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 /Users/j.z/code/skills-auditor/scripts/sensor_hook.py --provider codex"
+            "command": "python3 scripts/sensor_hook.py --provider codex"
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 /Users/j.z/code/skills-auditor/scripts/sensor_hook.py --provider codex"
+            "command": "python3 scripts/sensor_hook.py --provider codex"
           }
         ]
       }
