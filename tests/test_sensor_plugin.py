@@ -34,8 +34,9 @@ class TestSensorPlugin(unittest.TestCase):
         for event_name in ("SessionStart", "PreToolUse", "PostToolUse", "Stop"):
             self.assertIn(event_name, hooks)
             encoded = json.dumps(hooks[event_name])
-            self.assertIn(str(REPO_ROOT / "scripts" / "sensor_hook.py"), encoded)
+            self.assertIn("python3 scripts/sensor_hook.py", encoded)
             self.assertIn("--provider codex", encoded)
+            self.assertNotIn("/Users/", encoded)
         self.assertNotIn("SessionEnd", hooks)
 
     def test_repo_marketplace_points_at_plugin(self) -> None:
