@@ -4,6 +4,12 @@ One-command audit and sync for local AI skill folders (Cursor, OpenClaw, etc.).
 
 **Cursor / agent skill pack:** root [`SKILL.md`](SKILL.md) is the **top entry** (default full pipeline with **`--apply`** on dedup/route/sync unless the operator asks for dry-run or sets `SKILLS_AUDITOR_DRY_RUN=1`); layered sub-skills live under [`skills/`](skills/README.md). Optional env: [`config/skills-auditor.pipeline.example.env`](config/skills-auditor.pipeline.example.env).
 
+## Start here
+
+- [Start in 3 minutes](https://r.fulmail.net/r/oss/skills-auditor/readme_top/primary/quickstart/v1)
+- [See examples](https://r.fulmail.net/r/oss/skills-auditor/readme_top/secondary/examples/v1)
+- [Use in CI / automation](https://r.fulmail.net/r/oss/skills-auditor/readme_top/secondary/ci/v1)
+
 ## Why this exists
 
 Skill folders tend to drift over time:
@@ -61,6 +67,8 @@ This installs the **`skills-audit`** console script and enables **`python -m ski
 
 **Without any install:** run **`python3 scripts/skills_audit.py`** from the repo root (it prepends the repo to `sys.path`).
 
+Install not behaving as expected? Start with [Troubleshooting](https://r.fulmail.net/r/oss/skills-auditor/install_block/inline/troubleshoot/v1).
+
 ## Tests
 
 ```bash
@@ -108,6 +116,49 @@ skills-audit sync \
   --map-file config/sources.example.json \
   --apply
 ```
+
+## Examples
+
+Use these command shapes as starting points:
+
+```bash
+# Inspect one install root.
+skills-audit audit --skills-dir "$HOME/.cursor/skills"
+
+# Inspect Cursor and Claude Code roots together.
+skills-audit audit \
+  --skills-dir "$HOME/.cursor/skills" \
+  --skills-dir "$HOME/.claude/skills"
+
+# Preview discovery-driven sync into a project-local Codex root.
+skills-audit sync-discover \
+  --source .agents/skills \
+  --source .cursor/skills \
+  --skills-dir .codex/skills
+```
+
+## CI / Automation
+
+Use dry-run checks in CI first. Fail CI on duplicate names or invalid metadata before allowing any sync job to apply changes.
+
+```bash
+python3 -m unittest discover -s tests -v
+
+skills-audit audit \
+  --skills-dir "$HOME/.codex/skills" \
+  --fail-on-duplicate-names \
+  --metadata-platform codex
+```
+
+Keep `--apply` out of scheduled automation until the audit output is stable and reviewed.
+
+## Troubleshooting
+
+- If `skills-audit` is not found, activate the virtualenv or run `python3 scripts/skills_audit.py` from the repo root.
+- If metadata validation fails, run `skills-audit metadata-repair --platform codex --skills-dir "$HOME/.codex/skills"` first without `--apply`.
+- If a sync would replace a directory, review the dry-run output before adding `--apply`; existing directories are archived before relinking.
+
+[Share a use case](https://r.fulmail.net/r/oss/skills-auditor/footer/secondary/use_case/v1) if your setup needs a dedicated recipe.
 
 ## gstack fork (`plan-ux-review`)
 
