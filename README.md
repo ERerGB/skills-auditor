@@ -178,7 +178,11 @@ Before depending on this repo in a team or organization, inspect the operational
 
 ## Link Measurement
 
-Some decision links in this README route through `r.fulmail.net` before landing on GitHub. They record aggregate path-intent fields only, such as route id, referrer host, user-agent class, and timestamp. They do not set cookies or store raw IP addresses, GitHub usernames, visitor ids, or full user-agent strings.
+Some decision links in this README route through `r.fulmail.net` before landing on GitHub. They record path-intent fields such as route id, referrer host, user-agent class, timestamp, and a short-window correlation id.
+
+For browser-like requests, `r.fulmail.net` may set a first-party `oss_corr` cookie for up to 30 minutes to connect multiple route clicks inside one short window. The value is random, opaque, `Secure`, `HttpOnly`, and `SameSite=Lax`; it is not derived from IP address, user agent, GitHub account, or browser fingerprint. Bot, CLI, and automation requests do not receive this cookie.
+
+The redirect layer does not store raw IP addresses, GitHub usernames, visitor ids, session ids, full user-agent strings, or persistent cookies.
 
 ## gstack fork (`plan-ux-review`)
 
