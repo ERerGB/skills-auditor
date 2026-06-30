@@ -6,6 +6,7 @@ One-command audit and sync for local AI skill folders (Cursor, OpenClaw, etc.).
 
 ## Start here
 
+- [Understand the project fit](https://r.fulmail.net/r/oss/skills-auditor/readme_top/primary/purpose/v1)
 - [Start in 3 minutes](https://r.fulmail.net/r/oss/skills-auditor/readme_top/primary/quickstart/v1)
 - [See examples](https://r.fulmail.net/r/oss/skills-auditor/readme_top/secondary/examples/v1)
 - [Use in CI / automation](https://r.fulmail.net/r/oss/skills-auditor/readme_top/secondary/ci/v1)
@@ -66,6 +67,8 @@ This installs the **`skills-audit`** console script and enables **`python -m ski
 **Global CLI (optional):** `pipx install /path/to/skills-auditor` (or `pipx install .` from the repo).
 
 **Without any install:** run **`python3 scripts/skills_audit.py`** from the repo root (it prepends the repo to `sys.path`).
+
+Need exact install boundaries or a verification step? Start with the [install checklist](https://r.fulmail.net/r/oss/skills-auditor/install_block/primary/install/v1).
 
 Install not behaving as expected? Start with [Troubleshooting](https://r.fulmail.net/r/oss/skills-auditor/install_block/inline/troubleshoot/v1).
 
@@ -137,6 +140,10 @@ skills-audit sync-discover \
   --skills-dir .codex/skills
 ```
 
+## API / Skill Contract
+
+The top-level skill contract, default apply behavior, environment variables, and sub-skill routing are documented in the [skill API reference](https://r.fulmail.net/r/oss/skills-auditor/docs/primary/api_reference/v1).
+
 ## CI / Automation
 
 Use dry-run checks in CI first. Fail CI on duplicate names or invalid metadata before allowing any sync job to apply changes.
@@ -152,6 +159,15 @@ skills-audit audit \
 
 Keep `--apply` out of scheduled automation until the audit output is stable and reviewed.
 
+## Adoption Checks
+
+Before depending on this repo in a team or organization, inspect the operational signals:
+
+- Maintenance: [release status](https://r.fulmail.net/r/oss/skills-auditor/maintenance/primary/release/v1) and [change history](https://r.fulmail.net/r/oss/skills-auditor/maintenance/secondary/changelog/v1)
+- Trust: [security policy](https://r.fulmail.net/r/oss/skills-auditor/trust/primary/security_policy/v1) and [dependency graph](https://r.fulmail.net/r/oss/skills-auditor/trust/secondary/dependency_graph/v1)
+- Governance: [license](https://r.fulmail.net/r/oss/skills-auditor/governance/primary/license/v1)
+- Escape hatch: [alternatives and comparison notes](https://r.fulmail.net/r/oss/skills-auditor/footer/secondary/alternatives/v1)
+
 ## Troubleshooting
 
 - If `skills-audit` is not found, activate the virtualenv or run `python3 scripts/skills_audit.py` from the repo root.
@@ -159,6 +175,10 @@ Keep `--apply` out of scheduled automation until the audit output is stable and 
 - If a sync would replace a directory, review the dry-run output before adding `--apply`; existing directories are archived before relinking.
 
 [Share a use case](https://r.fulmail.net/r/oss/skills-auditor/footer/secondary/use_case/v1) if your setup needs a dedicated recipe.
+
+## Link Measurement
+
+Some decision links in this README route through `r.fulmail.net` before landing on GitHub. They record aggregate path-intent fields only, such as route id, referrer host, user-agent class, and timestamp. They do not set cookies or store raw IP addresses, GitHub usernames, visitor ids, or full user-agent strings.
 
 ## gstack fork (`plan-ux-review`)
 
