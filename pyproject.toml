@@ -25,6 +25,7 @@ packages = ["skills_auditor"]
 include = [
   "/skills_auditor",
   "/config",
+  "/docs",
   "/scripts",
   "/README.md",
   "/SKILL.md",

@@ -1,691 +1,87 @@
 # skills-auditor
 
-One-command audit and sync for local AI skill folders (Cursor, OpenClaw, etc.).
+Audit, deduplicate, route, and sync local AI skill folders for Cursor, Claude Code, Codex, and custom agent workflows.
 
-**Cursor / agent skill pack:** root [`SKILL.md`](SKILL.md) is the **top entry** (default full pipeline with **`--apply`** on dedup/route/sync unless the operator asks for dry-run or sets `SKILLS_AUDITOR_DRY_RUN=1`); layered sub-skills live under [`skills/`](skills/README.md). Optional env: [`config/skills-auditor.pipeline.example.env`](config/skills-auditor.pipeline.example.env).
+Use it when local skill directories have drifted across machines, repositories, or agent runtimes and you need a reversible audit before changing files.
 
-## Start here
+## Who this is for
 
-- [Understand the project fit](https://r.fulmail.net/r/oss/skills-auditor/readme_top/primary/purpose/v1)
-- [Start in 3 minutes](https://r.fulmail.net/r/oss/skills-auditor/readme_top/primary/quickstart/v1)
-- [See examples](https://r.fulmail.net/r/oss/skills-auditor/readme_top/secondary/examples/v1)
-- [Use in CI / automation](https://r.fulmail.net/r/oss/skills-auditor/readme_top/secondary/ci/v1)
+- Solo developers who copy skills between local agent tools and need to know what is stale or duplicated.
+- Platform or DX engineers who maintain shared skill folders for a team.
+- Agent workflow maintainers who need repeatable evidence before syncing, replacing, or routing skills.
 
-## Why this exists
+## Quick fit check
 
-Skill folders tend to drift over time:
+Use skills-auditor if you need to answer:
 
-- broken symlinks after moving repositories,
-- copied folders falling behind upstream sources,
-- mixed local folders and refs with unclear ownership.
+- Which local skills are symlinks, directories, files, or broken links?
+- Which skill names collide across install roots or discovery sources?
+- What would change before I apply a sync?
+- Can Cursor, Claude Code, Codex, or project-local roots be checked in one repeatable flow?
 
-This repo provides a safe workflow:
+If you only need to copy one folder once, a shell command is probably enough. If you need ongoing inspection and safe sync planning, use this repo.
 
-1. **Audit** current state.
-2. **Plan** sync actions in dry-run mode.
-3. **Apply** only when explicitly approved.
-
-## Features
-
-- Audit `~/.cursor/skills`, `~/.claude/skills`, or any custom skill root
-- Repeat `--skills-dir` to audit/sync **Cursor + Claude Code** in one run
-- Detect symlink health (`ok` / `broken`)
-- Detect folder mode (`symlink` / `directory` / `file`)
-- Audit discovery-layer collisions across multiple sources
-- Validate `SKILL.md` frontmatter metadata by default, including Codex-ready `name` + `description`, following top-level symlinked skills in install roots
-- Repair safe metadata problems idempotently with `metadata-repair` (`--apply` writes; dry-run reports pending repairs)
-- Record local, gitignored trigger, observability, and agent sensor logs for prompt-level routing review
-- Summarize local log and route trace storage usage with retention planning formulas
-- Treat regression runners as adapters; Promptfoo is the first target for skill-trigger evals
-- **Platform-tagged discovery profiles** (`cursor`, `claude-code`, or `*`): see below
-- Build canonical injection preview with source priority (includes per-source platforms)
-- Sync selected skills to canonical sources via mapping file
-- Discovery-driven sync (`sync-discover`) that recursively scans source roots, aliases slash names for install roots, and replicates skills into multiple agent environments without a hand-maintained map
-- **Optional `--target-platform` + `--discovery-profile`** on `sync` to skip skills whose canonical path lives under a source that does not allow that platform
-- Safe replacement: existing directories are archived before relinking
-- CLI default dry-run until `--apply`; Cursor top skill [`SKILL.md`](SKILL.md) defaults to apply unless dry-run
-
-### Drift and dirty counts (`audit --with-drift`)
-
-- **`dirty_count` (repo):** number of `git status --porcelain` lines for the **whole** repository backing the skill path (same as before).
-- **`skill_dirty_count`:** same count **scoped** to the resolved skill directory via `git status --porcelain -- <path>`.
-- **Monorepos:** if only *other* paths in the repo are dirty, the audit table shows `skill_clean (repo_dirty=N)` instead of looking like that skill folder was edited. When the skill tree itself has changes, both `repo_dirty` and `skill_dirty` appear in `drift(...)`.
-
-## Install
-
-From a clone of this repo, use a virtualenv (recommended on macOS / PEP 668):
+## 3-minute quickstart
 
 ```bash
-cd /path/to/skills-auditor
+git clone https://github.com/ERerGB/skills-auditor.git
+cd skills-auditor
 python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -e .
+
+skills-audit audit --skills-dir "$HOME/.cursor/skills"
 ```
 
-This installs the **`skills-audit`** console script and enables **`python -m skills_auditor`**.
+The first command to run is `audit`. It is read-only and gives you the current shape of the target skill root.
 
-**Global CLI (optional):** `pipx install /path/to/skills-auditor` (or `pipx install .` from the repo).
+Need to run without installing?
 
-**Without any install:** run **`python3 scripts/skills_audit.py`** from the repo root (it prepends the repo to `sys.path`).
+```bash
+python3 scripts/skills_audit.py audit --skills-dir "$HOME/.cursor/skills"
+```
 
-Need exact install boundaries or a verification step? Start with the [install checklist](https://r.fulmail.net/r/oss/skills-auditor/install_block/primary/install/v1).
+<!-- atlas-map:start -->
+## Documentation Map
 
-Install not behaving as expected? Start with [Troubleshooting](https://r.fulmail.net/r/oss/skills-auditor/install_block/inline/troubleshoot/v1).
+| Need | Read | Measured open |
+| --- | --- | --- |
+| Understand if this fits | [docs/getting-started.md](docs/getting-started.md) | [purpose](https://r.fulmail.net/r/oss/skills-auditor/readme_top/primary/purpose/v1) |
+| Run the first safe audit | [docs/getting-started.md#quickstart](docs/getting-started.md#quickstart) | [quickstart](https://r.fulmail.net/r/oss/skills-auditor/readme_top/primary/quickstart/v1) |
+| Install safely | [docs/install.md](docs/install.md) | [install](https://r.fulmail.net/r/oss/skills-auditor/install_block/primary/install/v1) |
+| Find command recipes | [docs/examples.md](docs/examples.md) | [examples](https://r.fulmail.net/r/oss/skills-auditor/readme_top/secondary/examples/v1) |
+| Use it in CI | [docs/ci.md](docs/ci.md) | [ci](https://r.fulmail.net/r/oss/skills-auditor/readme_top/secondary/ci/v1) |
+| Debug a failed install or audit | [docs/troubleshooting.md](docs/troubleshooting.md) | [troubleshoot](https://r.fulmail.net/r/oss/skills-auditor/install_block/inline/troubleshoot/v1) |
+| Inspect the skill contract | [docs/skill-contract.md](docs/skill-contract.md) | [api_reference](https://r.fulmail.net/r/oss/skills-auditor/docs/primary/api_reference/v1) |
+| Evaluate security and dependencies | [docs/security.md](docs/security.md) | [security_policy](https://r.fulmail.net/r/oss/skills-auditor/trust/primary/security_policy/v1) |
+| Compare alternatives | [docs/alternatives.md](docs/alternatives.md) | [alternatives](https://r.fulmail.net/r/oss/skills-auditor/footer/secondary/alternatives/v1) |
+
+Full searchable map: [atlas.fulmail.net/oss/skills-auditor](https://atlas.fulmail.net/oss/skills-auditor)
+<!-- atlas-map:end -->
+
+## Skill pack entry
+
+The root [`SKILL.md`](SKILL.md) is the agent entry point. It runs the full audit pipeline by default and uses `--apply` for dedup, route, and sync unless the operator asks for dry-run or sets:
+
+```bash
+export SKILLS_AUDITOR_DRY_RUN=1
+```
+
+Layered sub-skills live under [`skills/`](skills/README.md). Optional pipeline environment examples live in [`config/skills-auditor.pipeline.example.env`](config/skills-auditor.pipeline.example.env).
 
 ## Tests
 
 ```bash
-cd /path/to/skills-auditor
 python3 -m unittest discover -s tests -v
 ```
 
-## Quick Start
+## Link measurement
 
-```bash
-cd /path/to/skills-auditor
-
-# 1) Audit current status
-skills-audit audit \
-  --skills-dir "$HOME/.cursor/skills"
-
-# 2) Plan sync (dry-run)
-skills-audit sync \
-  --skills-dir "$HOME/.cursor/skills" \
-  --map-file config/sources.example.json
-
-# 2b) Same mapping, both Cursor + Claude Code global roots (dry-run)
-skills-audit sync \
-  --skills-dir "$HOME/.cursor/skills" \
-  --skills-dir "$HOME/.claude/skills" \
-  --map-file config/sources.example.json
-
-# 3) Discovery-layer audit (multi-source, dedupe preview)
-skills-audit audit-discovery \
-  --source "$HOME/.cursor/skills" \
-  --source "$HOME/.cursor/skills-cursor" \
-  --source "/path/to/your/project/.cursor/skills"
-
-# 4) Discovery-driven sync into Cursor + Claude + Codex roots (dry-run)
-skills-audit sync-discover \
-  --source /path/to/project/.agents/skills \
-  --source /path/to/project/.cursor/skills \
-  --source /path/to/project/.claude/skills \
-  --skills-dir /path/to/project/.codex/skills \
-  --skills-dir "$HOME/.codex/skills"
-
-# 5) Apply mapped sync
-skills-audit sync \
-  --skills-dir "$HOME/.cursor/skills" \
-  --map-file config/sources.example.json \
-  --apply
-```
-
-## Examples
-
-Use these command shapes as starting points:
-
-```bash
-# Inspect one install root.
-skills-audit audit --skills-dir "$HOME/.cursor/skills"
-
-# Inspect Cursor and Claude Code roots together.
-skills-audit audit \
-  --skills-dir "$HOME/.cursor/skills" \
-  --skills-dir "$HOME/.claude/skills"
-
-# Preview discovery-driven sync into a project-local Codex root.
-skills-audit sync-discover \
-  --source .agents/skills \
-  --source .cursor/skills \
-  --skills-dir .codex/skills
-```
-
-## API / Skill Contract
-
-The top-level skill contract, default apply behavior, environment variables, and sub-skill routing are documented in the [skill API reference](https://r.fulmail.net/r/oss/skills-auditor/docs/primary/api_reference/v1).
-
-## CI / Automation
-
-Use dry-run checks in CI first. Fail CI on duplicate names or invalid metadata before allowing any sync job to apply changes.
-
-```bash
-python3 -m unittest discover -s tests -v
-
-skills-audit audit \
-  --skills-dir "$HOME/.codex/skills" \
-  --fail-on-duplicate-names \
-  --metadata-platform codex
-```
-
-Keep `--apply` out of scheduled automation until the audit output is stable and reviewed.
-
-## Adoption Checks
-
-Before depending on this repo in a team or organization, inspect the operational signals:
-
-- Maintenance: [release status](https://r.fulmail.net/r/oss/skills-auditor/maintenance/primary/release/v1) and [change history](https://r.fulmail.net/r/oss/skills-auditor/maintenance/secondary/changelog/v1)
-- Trust: [security policy](https://r.fulmail.net/r/oss/skills-auditor/trust/primary/security_policy/v1) and [dependency graph](https://r.fulmail.net/r/oss/skills-auditor/trust/secondary/dependency_graph/v1)
-- Governance: [license](https://r.fulmail.net/r/oss/skills-auditor/governance/primary/license/v1)
-- Escape hatch: [alternatives and comparison notes](https://r.fulmail.net/r/oss/skills-auditor/footer/secondary/alternatives/v1)
-
-## Troubleshooting
-
-- If `skills-audit` is not found, activate the virtualenv or run `python3 scripts/skills_audit.py` from the repo root.
-- If metadata validation fails, run `skills-audit metadata-repair --platform codex --skills-dir "$HOME/.codex/skills"` first without `--apply`.
-- If a sync would replace a directory, review the dry-run output before adding `--apply`; existing directories are archived before relinking.
-
-[Share a use case](https://r.fulmail.net/r/oss/skills-auditor/footer/secondary/use_case/v1) if your setup needs a dedicated recipe.
-
-## Link Measurement
-
-Some decision links in this README route through `r.fulmail.net` before landing on GitHub. They record path-intent fields such as route id, referrer host, user-agent class, timestamp, and a short-window correlation id.
-
-For browser-like requests, `r.fulmail.net` may set a first-party `oss_corr` cookie for up to 30 minutes to connect multiple route clicks inside one short window. The value is random, opaque, `Secure`, `HttpOnly`, and `SameSite=Lax`; it is not derived from IP address, user agent, GitHub account, or browser fingerprint. Bot, CLI, and automation requests do not receive this cookie.
+The `Read` links in the documentation map are direct GitHub links. The `Measured open` links route through `r.fulmail.net` first and record aggregate path-intent fields such as route id, referrer host, user-agent class, timestamp, and a short-window correlation id.
 
 The redirect layer does not store raw IP addresses, GitHub usernames, visitor ids, session ids, full user-agent strings, or persistent cookies.
 
-## gstack fork (`plan-ux-review`)
+## Source and license
 
-If you use a [gstack](https://github.com/garrytan/gstack) fork that adds `plan-ux-review/` (for example `https://github.com/ERerGB/gstack`):
-
-- **Discovery:** use `config/discovery-profile.gstack-fork.example.json`, or `config/discovery-profile.cursor-jz.example.json`.
-- **Sync dry-run (Claude only, skip Cursor-only sources in the profile):**
-  `skills-audit sync --skills-dir ~/.claude/skills --map-file config/sources.gstack-fork.example.json --discovery-profile config/discovery-profile.cursor-jz.example.json --target-platform claude-code`
-
-## Discovery profile format
-
-`audit-discovery --profile-file` and `sync --discovery-profile` accept JSON with:
-
-- `sources`: ordered list. Each entry is either a **string** (path, treated as platform `["*"]` — sync/apply to all) or an **object** `{ "path": "~/.cursor/skills-cursor", "platform": ["cursor"] }`.
-- `exclude_sources`: path strings (unchanged).
-- `collapse_identical`: boolean (unchanged).
-
-Known platform labels (convention): `cursor`, `claude-code`. Use `"*"` inside `platform` to mean “all targets.”
-
-`audit-discovery` without `--profile-file` uses default roots and **infers** platforms (e.g. `~/.claude/skills` → `claude-code`, `skills-cursor` → `cursor`, shared `~/.cursor/skills` → both).
-
-Design note: platform metadata lives in the **profile** (management layer), not in each `SKILL.md`. See [issue #1](https://github.com/ERerGB/skills-auditor/issues/1).
-
-## Mapping File
-
-`sync` uses a JSON map from skill name to canonical source directory:
-
-```json
-{
-  "arch-review": "/Users/j.z/code/dev-doc-governance/skills/arch-review",
-  "auto-doc-index": "/Users/j.z/code/dev-doc-governance/skills/auto-doc-index"
-}
-```
-
-Rules:
-
-- Target path must exist.
-- Target must contain `SKILL.md`.
-- Missing targets are reported as errors and skipped.
-
-## Commands
-
-### `audit`
-
-Inspect the current skill root and print a table + JSON summary.
-
-After the main table, **`audit` always runs a duplicate `name:` check** (unless `--skip-duplicate-name-check`): for each top-level bundle folder under the skills root, it scans nested `SKILL.md` files and reports when the same frontmatter `name:` appears on **more than one resolved file** (symlinks to the same canonical `SKILL.md` count once — avoids false positives for DRY symlink layouts). Common real duplicates: gstack’s `.agents` / `.factory` copies vs primary trees. Use `--fail-on-duplicate-names` to exit with code **4** when any bundle has duplicates (for CI).
-
-```bash
-skills-audit audit --skills-dir "$HOME/.cursor/skills"
-skills-audit audit --skills-dir "$HOME/.claude/skills" --fail-on-duplicate-names
-```
-
-### `sync`
-
-Compare current state with expected sources, then propose/apply relinking.
-
-```bash
-skills-audit sync \
-  --skills-dir "$HOME/.cursor/skills" \
-  --map-file config/sources.example.json
-```
-
-Use `--apply` to execute changes.
-
-### `metadata`
-
-Validate `SKILL.md` frontmatter under one or more install roots. `audit` runs this check by
-default for every `SKILL.md` in each install root and exits with code **5** on invalid
-metadata unless `--allow-invalid-metadata` is passed. The scan follows top-level skill
-symlinks, so a root like `~/.codex/skills` validates the real symlink targets. The default
-platform profile is `codex`, which requires a fenced frontmatter block with non-empty `name`
-and `description` fields.
-
-```bash
-skills-audit metadata \
-  --platform codex \
-  --skills-dir "$HOME/.codex/skills" \
-  --fail-on-invalid
-
-skills-audit audit \
-  --skills-dir "$HOME/.codex/skills" \
-  --metadata-platform codex
-
-skills-audit audit \
-  --skills-dir "$HOME/.codex/skills" \
-  --skip-metadata-check
-```
-
-### `metadata-repair`
-
-Plan or apply safe, idempotent frontmatter repairs. The command can automatically:
-
-- prepend missing frontmatter with `name` inferred from the skill folder and `description`
-  inferred from the first body paragraph,
-- add missing `name` or `description` fields to an existing frontmatter block,
-- normalize an invalid `name` to the folder-derived skill name,
-- rewrite YAML-unsafe plain scalars, such as unquoted `description` values containing `: `,
-  as block scalars.
-
-Malformed or duplicate-key frontmatter is reported as `skip` for manual repair. Dry-run exits
-with code **1** when repairs are pending; skipped repairs exit with code **5**. `--apply` writes
-the changes and subsequent runs should report no actions.
-
-```bash
-skills-audit metadata-repair \
-  --platform codex \
-  --skills-dir "$HOME/.codex/skills"
-
-skills-audit metadata-repair \
-  --platform codex \
-  --skills-dir "$HOME/.codex/skills" \
-  --apply
-```
-
-**Platform-aware sync:** when you use the same map against both Cursor and Claude Code trees, pass the same discovery profile and `--target-platform cursor` or `claude-code`. Entries whose map target path falls under a profile source that does not list that platform are reported as `skip_platform` (no symlink changes).
-
-```bash
-skills-audit sync \
-  --skills-dir "$HOME/.claude/skills" \
-  --map-file config/sources.example.json \
-  --discovery-profile config/discovery-profile.cursor-jz.example.json \
-  --target-platform claude-code
-```
-
-### `sync-discover`
-
-Discover canonical skills from one or more source roots and sync them into one or more install roots without a hand-maintained JSON map. This is the preferred command when a repository wants all skills under its agent directories to be discoverable by multiple hosts.
-
-```bash
-# Dry-run using explicit source roots
-skills-audit sync-discover \
-  --source .agents/skills \
-  --source .cursor/skills \
-  --source .claude/skills \
-  --skills-dir .codex/skills \
-  --skills-dir "$HOME/.codex/skills"
-
-# Include installed global Cursor / Claude roots as extra source roots
-skills-audit sync-discover \
-  --skills-dir .agents/skills \
-  --skills-dir .cursor/skills \
-  --skills-dir .claude/skills \
-  --skills-dir .codex/skills \
-  --skills-dir "$HOME/.codex/skills" \
-  --include-global-sources \
-  --apply
-```
-
-Rules:
-
-- Sources are scanned recursively for `SKILL.md`.
-- The frontmatter `name:` is the logical skill identity; missing names fall back to the parent folder.
-- Slash names such as `magpie-loom/extract-leads` are exposed as top-level install aliases such as `magpie-loom-extract-leads`.
-- Each target root excludes its own canonical `target/alias` directory from the generated plan so local authoring directories are not backed up and replaced by self-links.
-- Dry-run remains the default; pass `--apply` to mutate.
-
-### `dedup`
-
-Detect duplicate frontmatter `name:` across **all** nested `SKILL.md` files under an install root (the same scope Slash and similar hosts use when listing `/` skills), then replace non-canonical copies with relative symlinks to the shortest-path canonical file.
-
-**Hash-aware dedup (v0.5.0):** `dedup` now compares file content hashes before acting:
-
-- **Same hash → `relink`**: True duplicate, safe to replace with symlink.
-- **Different hash → `skip_multi_version`**: Host-specific variant (e.g. Codex-trimmed copy), preserved intact. The output reports the inferred platform (see Convention-based inference below).
-
-This prevents blindly symlinking files that intentionally differ for different platforms (e.g. gstack's `.agents/skills/` copies are trimmed for Codex).
-
-This is the **recommended best practice** for skill packs that ship mirror directories (e.g. gstack's `.agents/skills/` and `.factory/skills/` alongside primary trees). Instead of maintaining multiple independent copies that drift apart, `dedup --apply` collapses identical copies into symlinks so:
-
-- IDE skill lists show **one entry** per logical skill (not N copies) for true duplicates
-- Content stays DRY — edit the canonical file, all mirrors follow
-- Host-specific variants (different content) are **never** overwritten — reported as `skip_multi_version` with inferred platform
-- `audit` duplicate-name check reports **zero findings** post-dedup (for identical copies)
-- Future `./setup` runs that recreate copies can be re-deduped in one command
-
-```bash
-# Dry-run: see what would be relinked vs skipped
-skills-audit dedup --skills-dir "$HOME/.claude/skills"
-
-# Apply: replace identical duplicates with symlinks (multi-version variants untouched)
-skills-audit dedup --skills-dir "$HOME/.claude/skills" --apply
-
-# Verify: audit should show zero duplicate names for truly identical copies
-skills-audit audit --skills-dir "$HOME/.claude/skills" --fail-on-duplicate-names
-```
-
-**Canonical selection heuristic:** shortest path under the **install root** wins. Examples:
-
-- `browse/SKILL.md` (canonical) vs `gstack/browse/SKILL.md` → relink the nested copy when hashes match
-- `gstack/SKILL.md` (canonical — shortest inside the pack)
-- `gstack/.agents/skills/gstack/SKILL.md` → symlink (if identical) or preserved (if different)
-- `gstack/.factory/skills/gstack/SKILL.md` → symlink (if identical) or preserved (if different)
-
-**Best practice workflow:**
-
-1. Install/update a skill pack (`./setup`, `git pull`, etc.)
-2. Run `skills-audit dedup --skills-dir <root> --apply`
-3. Run `skills-audit audit --skills-dir <root>` to verify
-4. For multi-version variants: use platform-aware discovery profiles (see below)
-5. Repeat after each pack update
-
-## Convention-based platform inference
-
-`dedup` automatically infers target platforms from well-known directory conventions inside a bundle:
-
-| Sub-directory | Inferred platform |
-|---|---|
-| `.agents/` | `codex` |
-| `.codex/` | `codex` |
-| `.factory/` | `factory` |
-
-When a `skip_multi_version` action is reported, the output includes the inferred platform so you know which host the variant targets. This information feeds into the discovery profile routing below.
-
-## Intra-bundle routing with exclude patterns
-
-Discovery profiles now support **`exclude`** patterns per source entry. This enables routing different sub-directories of the same bundle to different platforms:
-
-```json
-{
-  "sources": [
-    {
-      "path": "~/.claude/skills/gstack",
-      "platform": ["cursor", "claude-code"],
-      "exclude": [".agents/*", ".factory/*"]
-    },
-    {
-      "path": "~/.claude/skills/gstack/.agents/skills",
-      "platform": ["codex"]
-    },
-    {
-      "path": "~/.claude/skills/gstack/.factory/skills",
-      "platform": ["factory"]
-    }
-  ]
-}
-```
-
-This means:
-- **Cursor / Claude Code** see only the primary skill files (`.agents/` and `.factory/` excluded)
-- **Codex** sees only the trimmed `.agents/skills/` variants
-- **Factory** sees only the `.factory/skills/` variants
-
-See `config/discovery-profile.gstack-multiplatform.example.json` for a ready-to-use template.
-
-### `audit-discovery`
-
-Inspect discovery-layer behavior across multiple skill sources and output:
-
-- all discovered candidates
-- same-name collision groups
-- canonical selection by source priority
-- final injection preview
-
-```bash
-# default sources: ./.cursor/skills, ~/.cursor/skills, ~/.cursor/skills-cursor,
-#   ./.claude/skills, ~/.claude/skills
-skills-audit audit-discovery
-
-# explicit priority (first source wins conflicts)
-skills-audit audit-discovery \
-  --source "$HOME/.cursor/skills" \
-  --source "$HOME/.cursor/skills-cursor" \
-  --source "/path/to/your/project/.cursor/skills"
-
-# profile-driven discovery (recommended)
-skills-audit audit-discovery \
-  --profile-file config/discovery-profile.cursor-jz.example.json
-
-# CI-friendly summary
-skills-audit audit-discovery \
-  --profile-file config/discovery-profile.cursor-jz.example.json \
-  --summary-only
-
-# Fail when unresolved conflicts remain
-skills-audit audit-discovery \
-  --profile-file config/discovery-profile.cursor-jz.example.json \
-  --fail-on-conflict \
-  --fail-on-hash-conflict
-
-# exclude noisy paths and keep same-hash folding on
-skills-audit audit-discovery \
-  --source "$HOME/.cursor/plugins" \
-  --exclude-source "$HOME/.cursor/plugins/cache"
-```
-
-Discovery report includes:
-
-- `total_candidates`: all same-name hits
-- `effective_candidates`: after same-hash folding
-- `collapsed_identical`: number of folded duplicates
-- `hash_conflict`: same-name but different content hash (high risk)
-
-CI flags:
-
-- `--summary-only`: print compact counters only
-- `--fail-on-conflict`: non-zero exit if duplicates remain
-- `--fail-on-hash-conflict`: non-zero exit if same-name hash conflicts exist
-
-## Recommended Profile
-
-See `config/discovery-profile.cursor-jz.example.json`:
-
-- Includes user, built-in, project, and plugin roots
-- Excludes plugin cache to reduce duplicate noise
-- Keeps `collapse_identical=true` for stable canonical preview
-
-## Select-One Routing (v0.6.0)
-
-For multi-platform skill packs (e.g. gstack shipping primary + `.agents/` + `.factory/` variants), `route` replaces `dedup` with a four-phase state-machine pipeline:
-
-```
-DISCOVERED → CLASSIFIED → ROUTED → RESOLVED
-```
-
-- **Phase 1 (Discover)**: hash all variants of each skill identity
-- **Phase 2 (Classify)**: infer platform via path convention (`.agents/` → codex, `.factory/` → factory) or fallback to wildcard
-- **Phase 3 (Route)**: exact platform match beats wildcard; select one variant per identity
-- **Phase 4 (Resolve)**: terminal state per variant — `ACTIVE` / `ARCHIVED` / `DELETED` / `KEPT_HIDDEN` / `FLAGGED`
-
-Every transition is recorded in a JSON trace file under `~/.skills-auditor/traces/`.
-
-```bash
-# Dry-run: see what route would do for Cursor
-skills-audit route --platform cursor --skills-dir "$HOME/.cursor/skills"
-
-# Apply with archive strategy (superseded variants renamed, recoverable)
-skills-audit route --platform cursor --skills-dir "$HOME/.cursor/skills" --strategy archive --apply
-
-# Route for Codex — selects .agents/ variants, archives the rest
-skills-audit route --platform codex --skills-dir "$HOME/.claude/skills" --apply
-```
-
-### Resolve strategies
-
-| Strategy | Superseded variants become | Use when |
-|----------|---------------------------|----------|
-| `archive` (default) | Renamed to `SKILL.md.archived-<timestamp>` | Safe — can undo |
-| `delete` | Removed from disk | Confident cleanup |
-| `keep` | Left in place (no filesystem change) | Audit-only, no side effects |
-
-### State machine audit
-
-Validate accumulated traces against transition rules:
-
-```bash
-# Audit all traces in default dir (~/.skills-auditor/traces/)
-skills-audit audit-state-machine
-
-# Audit traces from a specific directory
-skills-audit audit-state-machine --trace-dir ./my-traces
-```
-
-Checks performed: illegal transitions, terminal state coverage, dead/unused states, signal coverage gaps, UNROUTABLE frequency, cross-run consistency (same skill selecting different variants across runs).
-
-## Trigger Observability Logs
-
-Route traces explain what happened inside Select-One Routing. Trigger observability logs sit one
-layer above that: they record whether a prompt should have triggered a skill, whether an
-observability hook should have fired, and which trace file should be reviewed later.
-The logs are the local ledger; external regression runners are integrated through adapters.
-Promptfoo is the first adapter target for skill-trigger evals.
-
-The default log root is repo-local and gitignored:
-
-```bash
-.skills-auditor-local/
-```
-
-Record a privacy-preserving skill trigger event:
-
-```bash
-skills-audit record-trigger-log \
-  --kind skill-trigger \
-  --prompt-hash "sha256:<prompt-hash>" \
-  --prompt-summary "<short privacy-preserving summary>" \
-  --expected-skill "<Skill>" \
-  --actual-skill "<Skill>" \
-  --verdict correct
-```
-
-Audit accumulated trigger logs:
-
-```bash
-skills-audit audit-trigger-logs --fail-on-error
-```
-
-The audit checks JSONL parseability, known event kinds, duplicate event ids, missing prompt
-references, missing skill references, missing trace references, and accidental `raw_prompt`
-storage. It also reports labeled accuracy plus false-positive / false-negative counts when
-events include regression verdicts.
-
-## Agent Sensor Logs
-
-Sensor logs are the lowest observability layer. They capture runtime facts exposed by an
-agent host through hooks or transcripts, such as tool name, session id, cwd, and file path.
-They do **not** prove semantic skill usage by themselves; the identity/alignment layer maps
-these path facts to canonical skills later.
-
-Record one Claude Code or Codex hook/transcript payload from stdin:
-
-```bash
-cat hook-payload.json | skills-audit record-sensor-event \
-  --provider claude-code \
-  --source hook
-```
-
-For a `Read` event pointing at `/Users/me/.codex/skills/foo/SKILL.md`, the normalized event
-is stored under:
-
-```text
-.skills-auditor-local/sensors/YYYY-MM-DD/claude-code.jsonl
-```
-
-and includes fields such as:
-
-```json
-{
-  "event_type": "skill_file_access",
-  "operation": "read",
-  "path": "/Users/me/.codex/skills/foo/SKILL.md",
-  "skill_name": "foo",
-  "provider": "claude-code"
-}
-```
-
-Audit accumulated sensor logs:
-
-```bash
-skills-audit audit-sensor-logs --fail-on-error
-```
-
-Use `--resolve-path` or `--hash-path` only when you intentionally want the sensor to inspect
-the observed local file. By default, the command only normalizes the payload it receives.
-
-Summarize storage usage and estimate retention:
-
-```bash
-skills-audit log-stats \
-  --events-per-day 100 \
-  --retention-days 30
-```
-
-Planning formulas:
-
-```text
-storage_bytes ~= events_per_day * retention_days * average_record_bytes * (1 + index_multiplier)
-compute_seconds ~= events * (parse_seconds + regression_seconds + optional_llm_judge_seconds)
-```
-
-See [`doc/trigger-observability-regression.md`](doc/trigger-observability-regression.md) for the
-current staged regression method.
-
-## Isolation Harness Recommendations
-
-Each `route` or `audit-state-machine` run should produce **reproducible, context-free results**. When an AI agent runs multiple audits in one session, prior decisions and cached impressions can bias later runs (context pollution). The fix: run the fact-collection phase in an **isolated subagent** with zero prior context.
-
-### Minimum viable isolation
-
-Use your IDE's native subagent mechanism with `readonly: true`:
-
-- **Cursor**: `Task` tool with `subagent_type: "shell"`, `readonly: true`
-- **Claude Code**: scope with `--allowedTools`
-
-### Dedicated harnesses
-
-| Harness | Stars | Isolation model | Best for |
-|---------|-------|----------------|----------|
-| [subagent-harness](https://github.com/ERerGB/subagent-harness) | — | SSOT compile → per-runtime artifact; each invocation is stateless by design | Cursor / Claude Code / Codex ecosystems — compile the audit SKILL.md into an isolated subagent artifact, run it, collect structured trace |
-| [dmux](https://github.com/standardagents/dmux) | 1.3k | git worktree per agent; parallel runs, smart merge | Running N audit configs in parallel (e.g. `--platform cursor` + `--platform codex` simultaneously), then merging trace results — similar to a `/batch` dispatch pattern |
-| [CrewAI](https://github.com/crewAIInc/crewAI) | 48k | Role-based delegation with hierarchical process | Teams already in the CrewAI ecosystem needing audit as a delegated worker task |
-
-### Cursor Task invocation template
-
-```
-Task(
-  subagent_type: "shell"
-  model: "fast"
-  description: "Audit skills for <platform>"
-  prompt: |
-    Run the following commands and return their full stdout.
-    Do NOT interpret or summarize — return raw output only.
-
-    cd /path/to/skills-auditor && python -m skills_auditor.cli route \
-      --platform <platform> \
-      --skills-dir ~/.cursor/skills \
-      --strategy archive
-
-    Then run:
-    python -m skills_auditor.cli audit-state-machine
-
-    Return both outputs verbatim.
-  readonly: true
-)
-```
-
-## Safety Notes
-
-- No destructive action in default mode.
-- Existing non-symlink entries are archived as:
-  - `<name>.backup-YYYYmmdd-HHMMSS`
-- Existing symlinks are unlinked and recreated only in `--apply` mode.
-
-## License
-
-MIT
+- Repository: [github.com/ERerGB/skills-auditor](https://github.com/ERerGB/skills-auditor)
+- License: [MIT](LICENSE)
