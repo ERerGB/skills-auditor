@@ -23,6 +23,13 @@ skills-audit audit \
   --with-drift
 ```
 
+## Ledger behavior
+
+- Mode: read-only, except optional `git fetch` during drift checks.
+- Suggested row: final `skill-run` for close verification with `status=completed` only when duplicate, metadata, drift, trace, and sync expectations are acceptable for the run.
+- If any previous cycle left `active`, `failed`, or unreasoned `blocked` rows, run `skills-audit ledger-check` and update or hand off those rows before closing.
+- Close does not delete artifacts, route traces, or local logs; record cleanup as a separate `handoff` if retention work is needed.
+
 ## Parent
 
 [`../../SKILL.md`](../../SKILL.md) · Detail: [`../discover/SKILL.md`](../discover/SKILL.md).

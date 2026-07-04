@@ -69,6 +69,30 @@ export SKILLS_AUDITOR_DRY_RUN=1
 
 Layered sub-skills live under [`skills/`](skills/README.md). Optional pipeline environment examples live in [`config/skills-auditor.pipeline.example.env`](config/skills-auditor.pipeline.example.env).
 
+## Skill-run ledgers
+
+Use ledgers when an orchestrator, sub-skill, or delegated worker needs a structured record of execution state, side effects, artifacts, traces, and handoffs.
+
+Ledgers use schema `skills-auditor-ledger/v1` and are stored under `.skills-auditor-local/ledgers/` by default. That directory is local and gitignored, matching the existing `.skills-auditor-local/` trigger and sensor logs. Ledgers do not replace route state-machine traces; record those trace files as `trace` resources when you need one run ledger to point at them.
+
+```bash
+skills-audit ledger-create --run-id run-1 --source orchestrator --mode apply
+
+skills-audit ledger-upsert \
+  --run-id run-1 \
+  --id route-trace \
+  --class trace \
+  --locator "$HOME/.skills-auditor/traces/trace.json" \
+  --owner skills-auditor-route \
+  --status preserved \
+  --metadata platform=codex
+
+skills-audit ledger-check --run-id run-1
+skills-audit ledger-summary --run-id run-1
+```
+
+Resource classes are `skill-run`, `subagent-run`, `trace`, `artifact`, and `external-resource`. Statuses are `active`, `completed`, `preserved`, `handoff`, `blocked`, and `failed`. `handoff` rows should include `--handoff-target`; `blocked` rows should include `--blocked-reason`.
+
 ## Tests
 
 ```bash

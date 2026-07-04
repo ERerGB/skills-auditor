@@ -48,6 +48,13 @@ skills-audit audit-discovery \
 - Tables: `link_status`, `has_skill_md`, duplicate `name:` **install-root** status (Slash-style recursive scan), optional drift columns.
 - JSON blocks in CLI output for scripting.
 
+## Ledger behavior
+
+- Mode: read-only, except optional `git fetch` during drift checks.
+- Suggested row: `skill-run` for the discover cycle, `completed` when the audit exits cleanly.
+- Drift checks may record each checked repository as `external-resource` with metadata for branch/ahead/behind/dirty counts.
+- No cleanup is expected; unresolved drift or metadata failures should be recorded as `blocked` or `failed` with a reason.
+
 ## Drift behavior
 
 - Symlinked skills with git context: `git fetch`, report synced vs DRIFT (`ahead` / `behind` / `dirty`).

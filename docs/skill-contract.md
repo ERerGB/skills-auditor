@@ -50,6 +50,39 @@ The no-install script entry is:
 python3 scripts/skills_audit.py
 ```
 
+## Skill-run ledger contract
+
+Ledgers are an optional compatibility layer for orchestrators that need to prove a delegated run reached a clean close. They do not replace route state-machine traces or local trigger/sensor logs.
+
+- Schema version: `skills-auditor-ledger/v1`.
+- Default path: `.skills-auditor-local/ledgers/<run-id>.json`.
+- Top-level fields: `schema_version`, `run`, `resources`, `checks`.
+- Resource classes: `skill-run`, `subagent-run`, `trace`, `artifact`, `external-resource`.
+- Statuses: `active`, `completed`, `preserved`, `handoff`, `blocked`, `failed`.
+
+Core commands:
+
+```bash
+skills-audit ledger-create --run-id <run-id> --source <orchestrator> --mode dry-run
+
+skills-audit ledger-upsert --run-id <run-id> \
+  --id route-trace --class trace \
+  --locator ~/.skills-auditor/traces/<trace>.json \
+  --owner skills-auditor-route --status preserved
+
+skills-audit ledger-check --run-id <run-id>
+skills-audit ledger-summary --run-id <run-id>
+```
+
+`ledger-check` updates the `checks` block in the ledger. Active rows are warnings. Failed rows, missing handoff targets, missing blocked reasons, invalid resource classes/statuses, and invalid schema metadata are errors.
+
+Existing artifacts should be linked by locator instead of copied into the ledger:
+
+- Route traces stay under `~/.skills-auditor/traces/`.
+- Trigger logs stay under `.skills-auditor-local/logs/`.
+- Sensor logs stay under `.skills-auditor-local/sensors/`.
+- Sync, archive, delete, or report outputs should be recorded as `artifact` rows.
+
 ## Configuration examples
 
 - [`config/sources.example.json`](../config/sources.example.json)

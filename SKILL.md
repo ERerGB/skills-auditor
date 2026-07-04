@@ -37,6 +37,14 @@ one hook/transcript JSON payload from stdin or `--input-file` into `.skills-audi
 use `skills-audit audit-sensor-logs` for schema/privacy checks. Sensor logs capture host-exposed
 facts such as tool name and file path; they do not by themselves prove semantic skill usage.
 
+**Execution ledgers:** use `skills-audit ledger-create`, `ledger-upsert`, `ledger-check`, and
+`ledger-summary` to maintain `skills-auditor-ledger/v1` records under
+`.skills-auditor-local/ledgers/`. Ledger rows may track `skill-run`, `subagent-run`, `trace`,
+`artifact`, and `external-resource` resources with statuses `active`, `completed`, `preserved`,
+`handoff`, `blocked`, or `failed`. Record route state-machine JSON as `trace` resources rather
+than replacing the route trace contract; record trigger/sensor log directories as
+`external-resource` or `artifact` rows only when a run needs to hand them off.
+
 Use `skills-audit log-stats` to summarize local log and route trace storage usage.
 
 ## Configuration (optional)
@@ -85,6 +93,36 @@ Use `"${AUDIT_DIRS[@]}"` and `"${DRIFT_FLAG[@]}"` in `skills-audit` invocations.
 | 6 — Close | [`skills/close/SKILL.md`](skills/close/SKILL.md) |
 
 Index: [`skills/README.md`](skills/README.md).
+
+## Execution ledger (optional compatibility layer)
+
+Create a run ledger before a multi-step or delegated audit:
+
+```bash
+skills-audit ledger-create --run-id <run-id> --source <orchestrator> --mode dry-run
+```
+
+Record each sub-skill or worker run as it completes:
+
+```bash
+skills-audit ledger-upsert --run-id <run-id> \
+  --id route-codex --class skill-run --locator "skills-audit route --platform codex" \
+  --owner skills-auditor-route --status completed
+
+skills-audit ledger-upsert --run-id <run-id> \
+  --id route-trace --class trace --locator ~/.skills-auditor/traces/<trace>.json \
+  --owner skills-auditor-route --status preserved
+```
+
+Before handoff or close, run:
+
+```bash
+skills-audit ledger-check --run-id <run-id>
+skills-audit ledger-summary --run-id <run-id>
+```
+
+`active` rows produce warnings. `failed`, missing handoff target, missing
+blocked reason, or schema problems produce errors.
 
 ## Full pipeline recipe (agent-executable)
 
