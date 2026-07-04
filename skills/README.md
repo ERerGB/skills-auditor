@@ -12,3 +12,5 @@ Layered skills under this folder. The **top entry** is the repository root [`../
 | [close](close/SKILL.md) | 6 | Repeat discover audit to confirm end state |
 
 Configuration template: [`../config/skills-auditor.pipeline.example.env`](../config/skills-auditor.pipeline.example.env).
+
+Ledger compatibility: when an orchestrator creates `.skills-auditor-local/ledgers/<run-id>.json`, every sub-skill should record its own `skill-run` row. Sub-skills that create traces, logs, archives, deletes, or sync changes should also record `trace` or `artifact` rows that point to the existing files or external resources.

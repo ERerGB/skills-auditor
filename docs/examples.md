@@ -61,3 +61,35 @@ skills-audit metadata-repair \
 ```
 
 Run again with `--apply` only after reading the proposed edits.
+
+## Record a delegated run ledger
+
+```bash
+RUN_ID="skills-auditor-$(date -u +%Y%m%dT%H%M%SZ)"
+
+skills-audit ledger-create \
+  --run-id "$RUN_ID" \
+  --source issue-lifecycle-router \
+  --mode apply
+
+skills-audit ledger-upsert \
+  --run-id "$RUN_ID" \
+  --id route-codex \
+  --class skill-run \
+  --locator "skills-audit route --platform codex --strategy archive --apply" \
+  --owner skills-auditor-route \
+  --status completed
+
+skills-audit ledger-upsert \
+  --run-id "$RUN_ID" \
+  --id route-trace-codex \
+  --class trace \
+  --locator "$HOME/.skills-auditor/traces/<trace-id>.json" \
+  --owner skills-auditor-route \
+  --status preserved
+
+skills-audit ledger-check --run-id "$RUN_ID"
+skills-audit ledger-summary --run-id "$RUN_ID"
+```
+
+Use `--status handoff --handoff-target <target>` when another operator or agent must continue. Use `--status blocked --blocked-reason <reason>` when the run cannot close.

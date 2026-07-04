@@ -28,6 +28,13 @@ skills-audit dedup --skills-dir "$HOME/.cursor/skills"
 skills-audit dedup --skills-dir "$HOME/.cursor/skills" --skills-dir "$HOME/.claude/skills" --apply
 ```
 
+## Ledger behavior
+
+- Mode: dry-run is read-only; `--apply` replaces duplicate files with symlinks.
+- Suggested rows: `skill-run` for the dedup cycle and `artifact` rows for any generated report or captured plan output.
+- Applied symlink replacements should be recorded as `artifact` or `external-resource` rows with `status=completed` and locators pointing to the affected skill paths.
+- `skip_multi_version` and other unresolved duplicate cases should be recorded as `blocked` or `handoff` with the next owner.
+
 ## Parent
 
 [`../../SKILL.md`](../../SKILL.md) · Related: [`../route/SKILL.md`](../route/SKILL.md).

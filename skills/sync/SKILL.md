@@ -38,6 +38,13 @@ skills-audit sync-discover \
 - Raw CLI defaults to dry-run for both `sync` and `sync-discover`; **`/skills-auditor`** top skill defaults to **`--apply`** on sync when `SKILLS_AUDITOR_SYNC_MAP_FILE` is set, unless dry-run or `SKILLS_AUDITOR_DRY_RUN=1`.
 - `sync-discover` converts slash names to top-level install aliases and excludes each target root from its own generated plan to avoid replacing canonical local directories with self-links.
 
+## Ledger behavior
+
+- Mode: dry-run is read-only; `--apply` may create, replace, or relink skill entries in each target root.
+- Suggested rows: `skill-run` for the sync cycle, `external-resource` for the map file or discovery sources, and `artifact` rows for captured sync plans or applied link changes.
+- Applied link changes should include locators for the target skill root entries and metadata such as `action=create_link`, `replace_link`, or `backup_and_link`.
+- Skipped or unsafe actions should become `blocked` rows with the reason, or `handoff` rows when a human/operator must decide.
+
 ## Parent
 
 [`../../SKILL.md`](../../SKILL.md).

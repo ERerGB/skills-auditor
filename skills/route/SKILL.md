@@ -47,6 +47,14 @@ skills-audit route \
   --trace-dir ./my-traces
 ```
 
+## Ledger behavior
+
+- Mode: dry-run writes route trace JSON but does not change skill files; `--apply` may archive, delete, or keep superseded variants based on `--strategy`.
+- Record the route cycle as a `skill-run` row. While work is open use `status=active`; after trace audit and any apply step, move it to `completed`, `handoff`, `blocked`, or `failed`.
+- Record the emitted state-machine trace as a `trace` row with `status=preserved` and `locator` set to the trace file path.
+- Applied archives/deletes should be recorded as `artifact` or `external-resource` rows with locators for the affected `SKILL.md` or archived path. Do not remove the route trace when cleaning up; the ledger points to it.
+- If routing cannot choose one active variant, mark the relevant row `blocked` with `--blocked-reason` or `handoff` with `--handoff-target`.
+
 ## Parent
 
 [`../../SKILL.md`](../../SKILL.md) · Next: [`../traces/SKILL.md`](../traces/SKILL.md).

@@ -28,6 +28,17 @@ skills-audit audit-discovery \
 
 Use this when source roots are shared across tools and the CI job needs to catch discovery collisions.
 
+## Ledger gate
+
+For delegated automation, check the run ledger before handoff:
+
+```bash
+skills-audit ledger-check --run-id "$RUN_ID" --fail-on-warning
+skills-audit ledger-summary --run-id "$RUN_ID"
+```
+
+Use this as a close gate after the run has recorded all `skill-run`, `subagent-run`, `trace`, `artifact`, and `external-resource` rows. `--fail-on-warning` treats active resources as unfinished work.
+
 ## What not to automate first
 
 Do not put `--apply` in scheduled CI until:

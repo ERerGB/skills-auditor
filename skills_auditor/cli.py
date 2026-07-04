@@ -17,6 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from skills_auditor.ledger import DEFAULT_LEDGER_ROOT, VALID_RESOURCE_CLASSES, VALID_STATUSES
+
 # Sentinel: source applies to all target platforms when syncing / filtering.
 PLATFORM_WILDCARD = "*"
 
@@ -2468,6 +2470,122 @@ def build_parser() -> argparse.ArgumentParser:
         help="Index/summary overhead as a fraction of raw logs (default: 0.1).",
     )
 
+    p_ledger_create = sub.add_parser(
+        "ledger-create",
+        help="Create a local skill-run execution ledger",
+    )
+    p_ledger_create.add_argument(
+        "--ledger-dir",
+        default=str(DEFAULT_LEDGER_ROOT),
+        help=f"Local ledger directory (default: {DEFAULT_LEDGER_ROOT}).",
+    )
+    p_ledger_create.add_argument(
+        "--run-id",
+        default="",
+        help="Stable run id. If omitted, one is generated.",
+    )
+    p_ledger_create.add_argument(
+        "--source",
+        default="manual",
+        help="Producer or orchestrator name (default: manual).",
+    )
+    p_ledger_create.add_argument(
+        "--mode",
+        default="",
+        help="Run mode, e.g. dry-run, apply, review.",
+    )
+
+    p_ledger_upsert = sub.add_parser(
+        "ledger-upsert",
+        help="Create or update one resource row in a local skill-run ledger",
+    )
+    p_ledger_upsert.add_argument(
+        "--ledger-dir",
+        default=str(DEFAULT_LEDGER_ROOT),
+        help=f"Local ledger directory (default: {DEFAULT_LEDGER_ROOT}).",
+    )
+    p_ledger_upsert.add_argument("--run-id", required=True, help="Ledger run id.")
+    p_ledger_upsert.add_argument(
+        "--create-if-missing",
+        action="store_true",
+        help="Create the ledger before upserting when it does not exist.",
+    )
+    p_ledger_upsert.add_argument(
+        "--source",
+        default="manual",
+        help="Producer or orchestrator name for created ledgers (default: manual).",
+    )
+    p_ledger_upsert.add_argument(
+        "--mode",
+        default="",
+        help="Run mode for created ledgers, e.g. dry-run, apply, review.",
+    )
+    p_ledger_upsert.add_argument("--id", required=True, help="Stable resource id.")
+    p_ledger_upsert.add_argument(
+        "--class",
+        dest="resource_class",
+        required=True,
+        choices=sorted(VALID_RESOURCE_CLASSES),
+        help="Resource class.",
+    )
+    p_ledger_upsert.add_argument("--locator", required=True, help="Path, URL, trace id, or external locator.")
+    p_ledger_upsert.add_argument("--owner", required=True, help="Owning skill, sub-skill, or subagent.")
+    p_ledger_upsert.add_argument(
+        "--status",
+        required=True,
+        choices=sorted(VALID_STATUSES),
+        help="Resource status.",
+    )
+    p_ledger_upsert.add_argument("--note", default="", help="Optional note appended to the row.")
+    p_ledger_upsert.add_argument(
+        "--metadata",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Metadata key/value. Repeatable.",
+    )
+    p_ledger_upsert.add_argument(
+        "--handoff-target",
+        default="",
+        help="Required target when status=handoff.",
+    )
+    p_ledger_upsert.add_argument(
+        "--blocked-reason",
+        default="",
+        help="Required reason when status=blocked.",
+    )
+
+    p_ledger_check = sub.add_parser(
+        "ledger-check",
+        help="Validate a local skill-run execution ledger",
+    )
+    p_ledger_check.add_argument(
+        "--ledger-dir",
+        default=str(DEFAULT_LEDGER_ROOT),
+        help=f"Local ledger directory (default: {DEFAULT_LEDGER_ROOT}).",
+    )
+    p_ledger_check.add_argument("--run-id", required=True, help="Ledger run id.")
+    p_ledger_check.add_argument(
+        "--fail-on-warning",
+        action="store_true",
+        help="Return non-zero when warnings exist, including active resources.",
+    )
+
+    p_ledger_summary = sub.add_parser(
+        "ledger-summary",
+        help="Summarize a local skill-run execution ledger",
+    )
+    p_ledger_summary.add_argument(
+        "--ledger-dir",
+        default=str(DEFAULT_LEDGER_ROOT),
+        help=f"Local ledger directory (default: {DEFAULT_LEDGER_ROOT}).",
+    )
+    p_ledger_summary.add_argument(
+        "--run-id",
+        default="",
+        help="Optional ledger run id. If omitted, summarizes every *.json ledger.",
+    )
+
     p_discovery = sub.add_parser(
         "audit-discovery",
         help="Audit discovery-layer collisions and canonical skill selection",
@@ -2968,6 +3086,137 @@ def main() -> int:
                     "events * (parse_seconds + regression_seconds + "
                     "optional_llm_judge_seconds)"
                 ),
+            },
+            indent=2,
+            ensure_ascii=False,
+        ))
+        return 0
+
+    if args.command == "ledger-create":
+        from skills_auditor.ledger import create_ledger, ledger_path
+
+        ledger_root = Path(args.ledger_dir).expanduser()
+        ledger = create_ledger(
+            run_id=args.run_id or None,
+            source=args.source,
+            mode=args.mode,
+            ledger_root=ledger_root,
+        )
+        out = ledger_path(ledger["run"]["id"], ledger_root)
+        print(f"ledger written: {out}")
+        print("\njson:")
+        print(json.dumps(ledger, indent=2, ensure_ascii=False))
+        return 0
+
+    if args.command == "ledger-upsert":
+        from skills_auditor.ledger import (
+            create_ledger,
+            load_ledger,
+            metadata_from_cli,
+            save_ledger,
+            upsert_resource,
+        )
+
+        ledger_root = Path(args.ledger_dir).expanduser()
+        try:
+            metadata = metadata_from_cli(args.metadata)
+            try:
+                ledger = load_ledger(args.run_id, ledger_root)
+            except FileNotFoundError:
+                if not args.create_if_missing:
+                    raise
+                ledger = create_ledger(
+                    run_id=args.run_id,
+                    source=args.source,
+                    mode=args.mode,
+                    ledger_root=ledger_root,
+                )
+            upsert_resource(
+                ledger,
+                resource_id=args.id,
+                resource_class=args.resource_class,
+                locator=args.locator,
+                owner=args.owner,
+                status=args.status,
+                note=args.note,
+                metadata=metadata,
+                handoff_target=args.handoff_target,
+                blocked_reason=args.blocked_reason,
+            )
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        out = save_ledger(ledger, ledger_root)
+        print(f"ledger updated: {out}")
+        print("\njson:")
+        print(json.dumps(ledger, indent=2, ensure_ascii=False))
+        return 0
+
+    if args.command == "ledger-check":
+        from skills_auditor.ledger import audit_ledger, load_ledger, save_ledger, update_checks
+
+        ledger_root = Path(args.ledger_dir).expanduser()
+        try:
+            ledger = load_ledger(args.run_id, ledger_root)
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        findings = audit_ledger(ledger)
+        update_checks(ledger, findings)
+        save_ledger(ledger, ledger_root)
+        errors = [f for f in findings if f.severity == "error"]
+        warnings = [f for f in findings if f.severity == "warning"]
+        infos = [f for f in findings if f.severity == "info"]
+        print(f"ledger: {args.run_id}")
+        print(f"findings: {len(findings)}")
+        print(f"  errors: {len(errors)}, warnings: {len(warnings)}, info: {len(infos)}")
+        for f in findings:
+            prefix = {"error": "ERR", "warning": "WARN", "info": "INFO"}.get(f.severity, "?")
+            parts = [f"[{prefix}] {f.check}: {f.detail}"]
+            if f.resource_id:
+                parts.append(f"resource={f.resource_id}")
+            print("  " + "  ".join(parts))
+        print("\njson:")
+        print(json.dumps(
+            {
+                "checks": ledger.get("checks", {}),
+                "findings": [f.to_dict() for f in findings],
+            },
+            indent=2,
+            ensure_ascii=False,
+        ))
+        if errors or (args.fail_on_warning and warnings):
+            return 1
+        return 0
+
+    if args.command == "ledger-summary":
+        from skills_auditor.ledger import ledger_summary, load_ledger
+
+        ledger_root = Path(args.ledger_dir).expanduser()
+        summaries = []
+        try:
+            if args.run_id:
+                summaries.append(ledger_summary(load_ledger(args.run_id, ledger_root)))
+            elif ledger_root.exists():
+                for path in sorted(ledger_root.glob("*.json")):
+                    summaries.append(ledger_summary(load_ledger(path.stem, ledger_root)))
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        total_resources = sum(s["resource_count"] for s in summaries)
+        print(f"ledgers: {len(summaries)}")
+        print(f"resources: {total_resources}")
+        for summary in summaries:
+            print(
+                f"  {summary['run_id']}: resources={summary['resource_count']} "
+                f"by_status={summary['by_status']} by_class={summary['by_class']}"
+            )
+        print("\njson:")
+        print(json.dumps(
+            {
+                "ledger_count": len(summaries),
+                "resource_count": total_resources,
+                "ledgers": summaries,
             },
             indent=2,
             ensure_ascii=False,
