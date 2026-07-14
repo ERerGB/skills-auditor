@@ -2,6 +2,10 @@
 
 Audit, deduplicate, route, and sync local AI skill folders for Cursor, Claude Code, Codex, and custom agent workflows.
 
+Native host path conventions are represented by environment descriptors. Cursor, Claude Code,
+and Codex are built in; another native host can reuse the same discovery-entry lifecycle by
+registering a `NativeEnvironment` instead of adding host branches to the sync algorithm.
+
 Use it when local skill directories have drifted across machines, repositories, or agent runtimes and you need a reversible audit before changing files.
 
 ## Who this is for
