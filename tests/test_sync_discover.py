@@ -57,6 +57,5 @@ class TestSyncDiscover(unittest.TestCase):
             mapping = discover_sync_mapping([source])
             self.assertEqual(mapping["external-skill"], str(external_skill.resolve()))
 
-
 if __name__ == "__main__":
     unittest.main()

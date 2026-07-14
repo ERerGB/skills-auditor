@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from skills_auditor.environments import BUILTIN_ENVIRONMENTS, builtin_project_skill_roots
 from skills_auditor.ledger import DEFAULT_LEDGER_ROOT, VALID_RESOURCE_CLASSES, VALID_STATUSES
 
 # Sentinel: source applies to all target platforms when syncing / filtering.
@@ -51,7 +52,7 @@ class EntryStatus:
 class SyncAction:
     name: str
     expected_target: str
-    action: str  # noop | create_link | replace_link | backup_and_link | skip_error
+    action: str  # noop | create_link | replace_link | archive_and_link | skip_error
     reason: str
 
 
@@ -1786,17 +1787,14 @@ def discover_sync_mapping(
 
 def default_sync_discover_sources(include_global_sources: bool) -> List[Path]:
     cwd = Path.cwd()
-    sources = [
-        cwd / ".agents" / "skills",
-        cwd / ".cursor" / "skills",
-        cwd / ".claude" / "skills",
-    ]
+    sources = [cwd / ".agents" / "skills", *builtin_project_skill_roots(cwd)]
     if include_global_sources:
         home = Path("~").expanduser()
-        sources.extend([
-            home / ".cursor" / "skills",
-            home / ".claude" / "skills",
-        ])
+        sources.extend(
+            root
+            for environment in BUILTIN_ENVIRONMENTS.all()
+            for root in environment.global_roots(home)
+        )
     return sources
 
 
@@ -1885,8 +1883,8 @@ def plan_sync(
                 SyncAction(
                     name=name,
                     expected_target=str(target),
-                    action="backup_and_link",
-                    reason="non-symlink entry exists",
+                    action="archive_and_link",
+                    reason="native entry exists and must be archived before linking",
                 )
             )
             continue
@@ -1895,6 +1893,9 @@ def plan_sync(
 
 
 def apply_actions(skills_dir: Path, actions: List[SyncAction]) -> None:
+    actionable = {"create_link", "replace_link", "archive_and_link"}
+    if any(action.action in actionable for action in actions):
+        skills_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     for action in actions:
         entry = skills_dir / action.name
@@ -1913,10 +1914,10 @@ def apply_actions(skills_dir: Path, actions: List[SyncAction]) -> None:
             os.symlink(str(target), str(entry))
             continue
 
-        if action.action == "backup_and_link":
-            backup_name = f"{action.name}.backup-{timestamp}"
-            backup_path = skills_dir / backup_name
-            entry.rename(backup_path)
+        if action.action == "archive_and_link":
+            archive_name = f"{action.name}.archived-{timestamp}"
+            archive_path = skills_dir / archive_name
+            entry.rename(archive_path)
             os.symlink(str(target), str(entry))
             continue
 
@@ -2247,13 +2248,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help=(
             "Source root to scan recursively for SKILL.md. Repeatable. "
-            "If omitted, scans .agents/skills, .cursor/skills, and .claude/skills under cwd."
+            "If omitted, scans .agents/skills plus every registered built-in native "
+            "environment under cwd."
         ),
     )
     p_sync_discover.add_argument(
         "--include-global-sources",
         action="store_true",
-        help="Also append ~/.cursor/skills and ~/.claude/skills as source roots.",
+        help="Also append every built-in native environment's global skill roots.",
     )
     p_sync_discover.add_argument(
         "--apply", action="store_true", help="Apply actions (default is dry-run)"
@@ -2757,6 +2759,8 @@ def main() -> int:
             else default_sync_discover_sources(args.include_global_sources)
         )
         roots = resolve_skills_dirs(args.skills_dirs)
+        needs_apply = False
+        skipped = False
         for idx, skills_dir in enumerate(roots):
             if idx > 0:
                 print()
@@ -2765,10 +2769,19 @@ def main() -> int:
             print(f"discovered: {len(mapping)} sync entr{'y' if len(mapping) == 1 else 'ies'}")
             actions = plan_sync(skills_dir, mapping)
             print_plan(actions, args.apply)
+            needs_apply = needs_apply or any(
+                action.action in {"create_link", "replace_link", "archive_and_link"}
+                for action in actions
+            )
+            skipped = skipped or any(action.action.startswith("skip_") for action in actions)
             if args.apply:
                 apply_actions(skills_dir, actions)
         if args.apply:
             print("\nApplied actions. Re-run audit to verify final state.")
+        if skipped:
+            return 5
+        if needs_apply and not args.apply:
+            return 1
         return 0
 
     if args.command == "dedup":

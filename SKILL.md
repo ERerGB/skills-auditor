@@ -60,6 +60,8 @@ Template: [`config/skills-auditor.pipeline.example.env`](config/skills-auditor.p
 | `SKILLS_AUDITOR_ROUTE_PLATFORMS` | Comma-separated, e.g. `cursor,codex` |
 | `SKILLS_AUDITOR_ROUTE_STRATEGY` | `archive` (default) \| `delete` \| `keep` |
 | `SKILLS_AUDITOR_SYNC_MAP_FILE` | If non-empty, sync cycle runs with this `--map-file` |
+| `SKILLS_AUDITOR_DISCOVERY_SOURCES` | Space-separated canonical source roots for discovery-driven sync; defaults to existing repo `.agents/.cursor/.claude` skill roots |
+| `SKILLS_AUDITOR_INSTALL_ROOTS` | Space-separated host discovery roots; defaults to repo `.codex/skills` when `.codex/` exists |
 | `SKILLS_AUDITOR_DRY_RUN` | `1` → **no** `--apply` on dedup / route / sync (overrides default apply) |
 | `SKILLS_AUDITOR_CONFIG` | Path to an env file to source for the above |
 
@@ -139,6 +141,13 @@ _roots="${SKILLS_AUDITOR_ROOTS:-$HOME/.cursor/skills $HOME/.claude/skills}"
 _roots="$_roots ${SKILLS_AUDITOR_EXTRA_ROOTS:-}"
 AUDIT_DIRS=()
 for d in $_roots; do [ -d "$d" ] && AUDIT_DIRS+=(--skills-dir "$d"); done
+_sync_sources="${SKILLS_AUDITOR_DISCOVERY_SOURCES:-$PWD/.agents/skills $PWD/.cursor/skills $PWD/.claude/skills}"
+SYNC_SOURCES=()
+for d in $_sync_sources; do [ -d "$d" ] && SYNC_SOURCES+=(--source "$d"); done
+_sync_targets="${SKILLS_AUDITOR_INSTALL_ROOTS:-}"
+[ -n "$_sync_targets" ] || [ ! -d "$PWD/.codex" ] || _sync_targets="$PWD/.codex/skills"
+SYNC_TARGETS=()
+for d in $_sync_targets; do SYNC_TARGETS+=(--skills-dir "$d"); done
 DRIFT_FLAG=()
 [ "${SKILLS_AUDITOR_WITH_DRIFT:-1}" = "1" ] && DRIFT_FLAG=(--with-drift)
 RSTRAT="${SKILLS_AUDITOR_ROUTE_STRATEGY:-archive}"
@@ -171,11 +180,20 @@ run_dedup() {
 run_traces() { skills-audit audit-state-machine; }
 
 run_sync() {
-  [ -n "${SKILLS_AUDITOR_SYNC_MAP_FILE:-}" ] || return 0
+  if [ -n "${SKILLS_AUDITOR_SYNC_MAP_FILE:-}" ]; then
+    if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" = "1" ]; then
+      skills-audit sync "${AUDIT_DIRS[@]}" --map-file "$SKILLS_AUDITOR_SYNC_MAP_FILE"
+    else
+      skills-audit sync "${AUDIT_DIRS[@]}" --map-file "$SKILLS_AUDITOR_SYNC_MAP_FILE" --apply
+    fi
+    return
+  fi
+  [ "${#SYNC_SOURCES[@]}" -gt 0 ] && [ "${#SYNC_TARGETS[@]}" -gt 0 ] || return 0
   if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" = "1" ]; then
-    skills-audit sync "${AUDIT_DIRS[@]}" --map-file "$SKILLS_AUDITOR_SYNC_MAP_FILE"
+    skills-audit sync-discover "${SYNC_SOURCES[@]}" "${SYNC_TARGETS[@]}"
   else
-    skills-audit sync "${AUDIT_DIRS[@]}" --map-file "$SKILLS_AUDITOR_SYNC_MAP_FILE" --apply
+    skills-audit sync-discover "${SYNC_SOURCES[@]}" "${SYNC_TARGETS[@]}" --apply
+    for d in $_sync_targets; do AUDIT_DIRS+=(--skills-dir "$d"); done
   fi
 }
 
