@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/integration-verification-v1.schema.json",
+  "title": "Skills Auditor Integration Verification v1",
+  "type": "object",
+  "required": ["schema_version", "checked_at", "receipt_id", "plan_id", "status", "checks", "summary"],
+  "properties": {
+    "schema_version": {"const": "skills-auditor-verification/v1"},
+    "checked_at": {"type": "string", "format": "date-time"},
+    "receipt_id": {"type": "string", "pattern": "^receipt-[0-9a-f]{20}$"},
+    "plan_id": {"type": "string", "pattern": "^plan-[0-9a-f]{20}$"},
+    "status": {"enum": ["passed", "failed"]},
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "ok"],
+        "properties": {
+          "code": {"enum": ["receipt_not_completed", "target_link", "source_tree"]},
+          "ok": {"type": "boolean"}
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["checks", "passed", "failed"],
+      "properties": {
+        "checks": {"type": "integer", "minimum": 0},
+        "passed": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

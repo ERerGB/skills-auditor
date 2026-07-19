@@ -1,39 +1,58 @@
 # Security and dependency review
 
-skills-auditor is a local developer tool. Its main risk surface is filesystem changes during sync and metadata repair, not a network service.
+skills-auditor is a local filesystem tool. Its main risk is applying a stale or misunderstood plan
+to a valuable install root.
 
 ## Default posture
 
-- Audit commands inspect local folders.
-- Sync commands are dry-run by default.
-- Apply-mode changes require `--apply`.
-- Existing directories are archived before relinking.
-- The skill pack can be forced into dry-run mode with `SKILLS_AUDITOR_DRY_RUN=1`.
+- `integrate` writes a local plan but does not change source or target entries.
+- `apply` accepts only a versioned plan and verifies its content checksum, full source-tree hashes, and
+  affected target-entry snapshots before writing.
+- `verify` checks receipt-scoped links and source-tree hashes.
+- Primitive repair, dedup, route, and sync commands remain plan-first.
+- The agent skill is plan-first; explicit apply authorization is required.
+- Route defaults to archive. Delete requires explicit strategy and apply authorization.
 
-## Dependency review
+## Filesystem boundary
 
-The package is intentionally small. Review dependency state through the repository:
+Native target entries are timestamp-archived before integration links replace them. Replacing an
+incorrect symlink does not archive its former target because the target content is not owned by the
+install entry.
 
-- Dependency graph: https://github.com/ERerGB/skills-auditor/network/dependencies
-- Project metadata: [`pyproject.toml`](../pyproject.toml)
+Apply checks all preconditions before the first write and again before each action. Filesystem
+operations across several target roots are not globally atomic. A mid-run failure produces a
+failed receipt when possible; preserve it for repair and handoff.
 
-## Dependency review anchor
+Installed entries are live symlinks, not immutable copies. A source edit after apply is immediately
+visible to the host; `verify` detects that drift but cannot prevent consumption between checks.
+Pin or protect canonical checkouts when runtime immutability matters.
 
-Use this section when evaluating whether a team can adopt the tool without importing an unexpected dependency surface.
+Plan IDs and receipt IDs are content checksums, not signatures. Protect plan files with the same
+access controls as the target roots they authorize.
 
-## Local data
+## Network and local data
 
-Sensor and trace features are local and gitignored. They are intended for prompt-level routing review and operational debugging, not for storing identity-level analytics.
+The integration transaction does not require network access. `drift-check` and `audit --with-drift`
+fetch Git remotes. Trigger, sensor, trace, plan, receipt, and ledger data remain local by default.
 
-## Reporting issues
+`.skills-auditor-local/` is gitignored. Route traces default to `~/.skills-auditor/traces/`.
+Sensor facts such as file access do not prove semantic skill use.
 
-Use GitHub issues for security or trust concerns unless the repository later adds a dedicated security policy:
+## Dependencies and license
 
-https://github.com/ERerGB/skills-auditor/issues
+The runtime uses the Python standard library. Build tooling is declared in
+[`pyproject.toml`](../pyproject.toml). The project is distributed under the
+[`MIT License`](../LICENSE).
 
 ## Adoption checklist
 
-- Run audit before sync.
-- Review dry-run output before apply.
-- Avoid scheduled apply jobs until the team owns the source map.
-- Keep local trace artifacts out of commits.
+- Keep canonical source roots and target install roots disjoint; target roots must not overlap.
+- Keep each skill payload self-contained; integration rejects source symlinks that escape its tree.
+- Review the saved plan rather than terminal text alone.
+- Apply the reviewed plan path; do not rebuild it implicitly.
+- Preserve receipts in controlled automation.
+- Verify after apply and before handoff.
+- Keep delete out of unattended workflows.
+
+Report security or trust concerns through
+[GitHub issues](https://github.com/ERerGB/skills-auditor/issues).

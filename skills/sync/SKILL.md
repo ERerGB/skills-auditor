@@ -35,7 +35,10 @@ skills-audit sync-discover \
 
 ## Safety
 
-- Raw CLI defaults to dry-run for both `sync` and `sync-discover`; **`/skills-auditor`** top skill defaults to **`--apply`** on sync when `SKILLS_AUDITOR_SYNC_MAP_FILE` is set, unless dry-run or `SKILLS_AUDITOR_DRY_RUN=1`.
+- Raw CLI and `/skills-auditor` both plan by default. The top skill adds `--apply` only after
+  explicit authorization or `SKILLS_AUDITOR_APPLY=1`; `SKILLS_AUDITOR_DRY_RUN=1` always wins.
+- For host adoption, prefer `integrate` → `apply <plan>` → `verify <receipt>` so apply consumes the
+  reviewed plan instead of rediscovering sources.
 - A `sync-discover` dry-run exits **1** when discovery entries are missing or stale, **5** for skipped unsafe actions, and **0** only when every discovered entry is already current. Apply creates a missing install root before registering entries.
 - In the top-level full pipeline, an explicit map remains authoritative. Without one, existing repository `.agents/.cursor/.claude` roots are discovered and registered into `.codex/skills` when the repository has a `.codex/` directory. Override with `SKILLS_AUDITOR_DISCOVERY_SOURCES` and `SKILLS_AUDITOR_INSTALL_ROOTS`.
 - `sync-discover` converts slash names to top-level install aliases and excludes each target root from its own generated plan to avoid replacing canonical local directories with self-links.

@@ -1,0 +1,13 @@
+{
+  "schema_version": "skills-auditor-integration/v1",
+  "project_root": ".",
+  "sources": [
+    ".agents/skills"
+  ],
+  "targets": [
+    "cursor",
+    "claude-code",
+    "codex"
+  ],
+  "metadata_platform": "codex"
+}

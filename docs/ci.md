@@ -1,51 +1,61 @@
 # CI and automation
 
-Use CI as a read-only quality gate. It should prove that skill names, metadata, and route assumptions are stable before a human applies changes.
+CI should validate sources, create machine-readable plans, and verify receipts. Applying to a
+persistent developer home directory is an operational action, not a test.
 
-## Baseline test job
+## Repository test gate
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-## Audit gate
+The repository's [CI workflow](../.github/workflows/ci.yml) installs the package and runs the suite
+on Python 3.9 through 3.14. Its distribution job also builds both package formats and runs
+`scripts/check_distribution.py`.
+
+## Source contract gate
 
 ```bash
 skills-audit audit \
-  --skills-dir "$HOME/.codex/skills" \
+  --skills-dir .agents/skills \
   --fail-on-duplicate-names \
   --metadata-platform codex
 ```
 
-This catches duplicate skill names and invalid frontmatter before the root is used by automation.
-
-## Discovery gate
+## Integration plan gate
 
 ```bash
-skills-audit audit-discovery \
-  --profile-file config/discovery-profile.gstack-multiplatform.example.json
+skills-audit integrate \
+  --config skills-auditor.json \
+  --format json \
+  --plan-out .skills-auditor-local/ci-plan.json \
+  > .skills-auditor-local/ci-plan-output.json
 ```
 
-Use this when source roots are shared across tools and the CI job needs to catch discovery collisions.
+`integrate` returns `0` for both changes and `noop`; inspect `summary.changes` in the JSON object if
+policy needs to distinguish them. Exit `2` means invalid input. Exit `3` means a contract conflict.
 
-## Ledger gate
+## Receipt gate
 
-For delegated automation, check the run ledger before handoff:
+When a controlled apply job produces a receipt, verify it in the same environment:
 
 ```bash
-skills-audit ledger-check --run-id "$RUN_ID" --fail-on-warning
-skills-audit ledger-summary --run-id "$RUN_ID"
+skills-audit verify \
+  .skills-auditor-local/receipts/<receipt-id>.json \
+  --format json
 ```
 
-Use this as a close gate after the run has recorded all `skill-run`, `subagent-run`, `trace`, `artifact`, and `external-resource` rows. `--fail-on-warning` treats active resources as unfinished work.
+Verification exits `3` when links or source-tree hashes no longer match the receipt.
 
 ## What not to automate first
 
-Do not put `--apply` in scheduled CI until:
+Do not schedule apply until:
 
-- The dry-run output has been reviewed.
-- The target root is backed up or disposable.
-- The team agrees on the canonical source map.
-- Directory replacement archive behavior is understood.
+- the repository owns one reviewed `skills-auditor.json`;
+- source and target roots are backed up or disposable;
+- archive behavior is understood;
+- the job preserves plan and receipt artifacts;
+- a failed receipt has an explicit handoff owner.
 
-Apply-mode sync is an operational action, not just a test.
+See [integration-contract.md](integration-contract.md) for transaction and partial-failure
+boundaries.

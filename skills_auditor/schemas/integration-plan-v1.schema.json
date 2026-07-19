@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/integration-plan-v1.schema.json",
+  "title": "Skills Auditor Integration Plan v1",
+  "type": "object",
+  "required": ["schema_version", "plan_id", "created_at", "spec", "source_skills", "targets", "summary"],
+  "properties": {
+    "schema_version": {"const": "skills-auditor-plan/v1"},
+    "plan_id": {"type": "string", "pattern": "^plan-[0-9a-f]{20}$"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "plan_path": {"type": "string"},
+    "spec": {
+      "type": "object",
+      "required": ["schema_version", "project_root", "sources", "targets", "metadata_platform"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-integration/v1"},
+        "project_root": {"type": "string", "minLength": 1},
+        "sources": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/resolvedTarget"}
+        },
+        "metadata_platform": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "source_skills": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "skill_root", "tree_sha256"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "skill_root": {"type": "string", "minLength": 1},
+          "tree_sha256": {"$ref": "#/$defs/sha256"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/targetPlan"}
+    },
+    "summary": {
+      "type": "object",
+      "required": ["skills", "targets", "actions", "changes"],
+      "properties": {
+        "skills": {"type": "integer", "minimum": 1},
+        "targets": {"type": "integer", "minimum": 1},
+        "actions": {"type": "integer", "minimum": 1},
+        "changes": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "snapshot": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {"kind": {"const": "missing"}},
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "target", "resolved"],
+          "properties": {
+            "kind": {"const": "symlink"},
+            "target": {"type": "string"},
+            "resolved": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "sha256"],
+          "properties": {
+            "kind": {"const": "file"},
+            "sha256": {"$ref": "#/$defs/sha256"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "tree_sha256"],
+          "properties": {
+            "kind": {"const": "directory"},
+            "tree_sha256": {"$ref": "#/$defs/sha256"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "mode"],
+          "properties": {
+            "kind": {"const": "other"},
+            "mode": {"type": "integer"}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "resolvedTarget": {
+      "type": "object",
+      "required": ["environment", "scope", "root"],
+      "properties": {
+        "environment": {"type": "string", "minLength": 1},
+        "scope": {"enum": ["project", "global"]},
+        "root": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "targetPlan": {
+      "type": "object",
+      "required": ["environment", "scope", "root", "actions"],
+      "properties": {
+        "environment": {"type": "string", "minLength": 1},
+        "scope": {"enum": ["project", "global"]},
+        "root": {"type": "string", "minLength": 1},
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/action"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "action": {
+      "type": "object",
+      "required": ["name", "expected_target", "action", "reason", "expected_tree_sha256", "entry_before", "archive_path", "archive_before"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "expected_target": {"type": "string", "minLength": 1},
+        "action": {"enum": ["create_link", "replace_link", "archive_and_link", "noop"]},
+        "reason": {"type": "string", "minLength": 1},
+        "expected_tree_sha256": {"$ref": "#/$defs/sha256"},
+        "entry_before": {"$ref": "#/$defs/snapshot"},
+        "archive_path": {"type": ["string", "null"]},
+        "archive_before": {"oneOf": [{"$ref": "#/$defs/snapshot"}, {"type": "null"}]}
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {"properties": {"action": {"const": "archive_and_link"}}},
+          "then": {
+            "properties": {
+              "archive_path": {"type": "string", "minLength": 1},
+              "archive_before": {"$ref": "#/$defs/snapshot"}
+            }
+          },
+          "else": {
+            "properties": {
+              "archive_path": {"type": "null"},
+              "archive_before": {"type": "null"}
+            }
+          }
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

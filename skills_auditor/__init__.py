@@ -1,3 +1,5 @@
-"""Audit and sync local AI agent skill directories (Cursor, Claude Code, etc.)."""
+"""Audit and integrate local AI agent skill directories."""
 
-__version__ = "0.2.0"
+from skills_auditor._version import __version__
+
+__all__ = ["__version__"]

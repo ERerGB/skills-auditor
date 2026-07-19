@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/integration-receipt-v1.schema.json",
+  "title": "Skills Auditor Integration Receipt v1",
+  "type": "object",
+  "required": ["schema_version", "receipt_id", "plan_id", "applied_at", "status", "results", "error"],
+  "properties": {
+    "schema_version": {"const": "skills-auditor-receipt/v1"},
+    "receipt_id": {"type": "string", "pattern": "^receipt-[0-9a-f]{20}$"},
+    "plan_id": {"type": "string", "pattern": "^plan-[0-9a-f]{20}$"},
+    "applied_at": {"type": "string", "format": "date-time"},
+    "receipt_path": {"type": "string"},
+    "status": {"enum": ["completed", "failed"]},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["environment", "scope", "root", "name", "action", "expected_target", "expected_tree_sha256", "archive_path", "entry_after", "verified"],
+        "properties": {
+          "environment": {"type": "string", "minLength": 1},
+          "scope": {"enum": ["project", "global"]},
+          "root": {"type": "string", "minLength": 1},
+          "name": {"type": "string", "minLength": 1},
+          "action": {"enum": ["create_link", "replace_link", "archive_and_link", "noop"]},
+          "expected_target": {"type": "string", "minLength": 1},
+          "expected_tree_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "archive_path": {"type": ["string", "null"]},
+          "entry_after": {
+            "type": "object",
+            "required": ["kind", "target", "resolved"],
+            "properties": {
+              "kind": {"const": "symlink"},
+              "target": {"type": "string"},
+              "resolved": {"type": "string"}
+            },
+            "additionalProperties": false
+          },
+          "verified": {"const": true}
+        },
+        "additionalProperties": false
+      }
+    },
+    "error": {"type": ["object", "null"]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "completed"}}},
+      "then": {"properties": {"error": {"type": "null"}}},
+      "else": {"properties": {"error": {"type": "object"}}}
+    }
+  ],
+  "additionalProperties": false
+}

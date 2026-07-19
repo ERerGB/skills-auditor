@@ -14,7 +14,8 @@ description: >
 
 ## Commands
 
-Install: `pip install -e .` from repo root, or `python3 scripts/skills_audit.py`.
+Install with `python -m pip install .` from the repository root, or use the no-install entry
+`python3 scripts/skills_audit.py`. Reserve editable installs for repository development.
 
 ```bash
 # Basic audit (repeat --skills-dir for each root)
@@ -34,10 +35,10 @@ When multi-source collision maps matter:
 
 ```bash
 skills-audit audit-discovery \
-  --profile-file config/discovery-profile.cursor-jz.example.json
+  --profile-file config/discovery-profile.multisource.example.json
 
 skills-audit audit-discovery \
-  --profile-file config/discovery-profile.cursor-jz.example.json \
+  --profile-file config/discovery-profile.multisource.example.json \
   --summary-only \
   --fail-on-conflict \
   --fail-on-hash-conflict

@@ -28,6 +28,11 @@ class NativeEnvironment:
             raise ValueError(f"Environment {self.key!r} has no project skill root")
         return self.project_roots(project_root)[0]
 
+    def primary_global_root(self, home: Path) -> Path:
+        if not self.global_skill_roots:
+            raise ValueError(f"Environment {self.key!r} has no global skill root")
+        return self.global_roots(home)[0]
+
 
 class NativeEnvironmentRegistry:
     def __init__(self, environments: Iterable[NativeEnvironment] = ()) -> None:

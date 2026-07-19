@@ -1,246 +1,166 @@
 ---
 name: skills-auditor
 description: >
-  Top entry for the Skills Auditor skill system: DEFAULT full pipeline applies filesystem changes
-  (dedup/route/sync use --apply) unless the operator explicitly asks for dry-run or sets
-  SKILLS_AUDITOR_DRY_RUN=1. Sub-skills under skills/. Triggers: /skills-auditor, skills audit, dedup,
-  route, drift, discovery profile.
+  Plan-first entry for auditing and integrating local AI skill roots. Generic invocations never
+  change skill definitions or install roots unless the operator explicitly requests apply or sets
+  SKILLS_AUDITOR_APPLY=1. Uses versioned plans and receipts for host integration.
 ---
 
-# Skills Auditor (top)
+# Skills Auditor
 
-## Default behavior (full pipeline + apply)
+> Inspect first. Apply only the state the operator reviewed.
 
-When the user invokes **`/skills-auditor`** or this skill **without** asking to stay read-only:
+## Default behavior
 
-1. Load optional config: if `SKILLS_AUDITOR_CONFIG` points to an env file, `source` it.
-2. If **`SKILLS_AUDITOR_MODE`** is unset or `full`, run **all** cycles in order. For **`metadata-repair`**, **`dedup`**, **`route`**, and **`sync`**, pass **`--apply`** by default (mutating steps actually change disk).
-3. **Dry-run exception:** if the user **explicitly** asks for dry-run (e.g. “dry run”, “只预览”, “不要 apply”, “plan only”) **or** **`SKILLS_AUDITOR_DRY_RUN=1`**, then **omit** `--apply` on those commands.
-4. If **`SKILLS_AUDITOR_MODE`** is a single cycle name, run **only** that cycle (same apply vs dry-run rules).
+When the operator invokes `/skills-auditor` without a narrower request:
 
-**Duplicate-name audit / dedup scope:** `skills-audit` treats each `--skills-dir` as one **install root** and scans **recursively** for colliding frontmatter `name:` (same scope Slash-style hosts use). That includes duplicates across sibling folders (for example `browse/` vs `gstack/browse/`), not only files nested inside the same top-level pack.
+1. Load `SKILLS_AUDITOR_CONFIG` when it points to an environment file.
+2. Run the requested cycle, or the full maintenance pipeline when
+   `SKILLS_AUDITOR_MODE` is unset or `full`.
+3. Keep definition and install-root changes in plan mode by default.
+4. Pass `--apply` only when the operator explicitly asks to apply changes or
+   `SKILLS_AUDITOR_APPLY=1`.
+5. `SKILLS_AUDITOR_DRY_RUN=1` is a compatibility override that always suppresses apply.
 
-**Metadata audit scope:** `audit` validates `SKILL.md` frontmatter by default for every visible skill under each `--skills-dir`, including top-level symlinked skills. The default platform profile is `codex`; invalid metadata exits with code **5** unless `--allow-invalid-metadata` is passed. Use `--skip-metadata-check` only for narrow investigation runs.
+`route` dry-runs still write trace evidence. `audit --with-drift` still fetches Git remotes.
+Neither side effect changes a skill definition or install root.
 
-**Metadata repair:** run `skills-audit metadata-repair --platform codex --skills-dir <root> --apply` to safely and idempotently add missing Codex frontmatter (`name` + `description`), fill missing scalar fields, or rewrite YAML-unsafe plain scalars (for example unquoted `description` values containing `: `) as block scalars. Without `--apply`, it is a dry-run and exits **1** when repairs are pending. Unsupported malformed frontmatter is skipped and exits **5**.
+## Choose one path
 
-**Narrowing without env files:** “audit only” → discover only (never mutating). “dedup dry-run” → dedup without `--apply`. “route Codex” with no dry-run wording → route **with** `--apply` for that run.
+### Integrate canonical sources into hosts
 
-**Codex metadata check:** run `skills-audit metadata --platform codex --skills-dir <root> --fail-on-invalid` for a standalone validation pass. The Codex profile requires a fenced frontmatter block with non-empty `name` and `description`.
+Prefer the high-level transaction for adoption and host registration:
 
-**Trigger observability logs:** use `skills-audit record-trigger-log` to append repo-local,
-gitignored JSONL events under `.skills-auditor-local/`; use `skills-audit audit-trigger-logs`
-for schema/privacy/regression checks.
+```bash
+skills-audit integrate \
+  --source .agents/skills \
+  --target codex
+```
 
-**Agent sensor logs:** use `skills-audit record-sensor-event --provider <provider>` to normalize
-one hook/transcript JSON payload from stdin or `--input-file` into `.skills-auditor-local/sensors/`;
-use `skills-audit audit-sensor-logs` for schema/privacy checks. Sensor logs capture host-exposed
-facts such as tool name and file path; they do not by themselves prove semantic skill usage.
+The command exits `0`, writes a `skills-auditor-plan/v1` file under
+`.skills-auditor-local/plans/`, and prints the exact apply command. It does not change the target.
 
-**Execution ledgers:** use `skills-audit ledger-create`, `ledger-upsert`, `ledger-check`, and
-`ledger-summary` to maintain `skills-auditor-ledger/v1` records under
-`.skills-auditor-local/ledgers/`. Ledger rows may track `skill-run`, `subagent-run`, `trace`,
-`artifact`, and `external-resource` resources with statuses `active`, `completed`, `preserved`,
-`handoff`, `blocked`, or `failed`. Record route state-machine JSON as `trace` resources rather
-than replacing the route trace contract; record trigger/sensor log directories as
-`external-resource` or `artifact` rows only when a run needs to hand them off.
+Only after an explicit apply request:
 
-Use `skills-audit log-stats` to summarize local log and route trace storage usage.
+```bash
+skills-audit apply .skills-auditor-local/plans/<plan-id>.json
+skills-audit verify .skills-auditor-local/receipts/<receipt-id>.json
+```
 
-## Configuration (optional)
+`apply` validates full source-tree hashes and target-entry snapshots from the reviewed plan. It never
+rediscovers sources. A stale plan exits `3` without starting the apply.
+
+Use `--target cursor`, `--target claude-code`, or `--target codex` for project roots. Append
+`@global` for the corresponding home root. Use `--target-root NAME=PATH` for an unregistered host.
+
+An optional repository `skills-auditor.json` can replace repeated source and target flags. Its
+contract is documented in [`docs/integration-contract.md`](docs/integration-contract.md).
+
+### Maintain existing install roots
+
+Use the primitive cycles when the request is specifically about metadata, duplicate identities,
+platform variants, traces, or an existing source map.
+
+| Cycle | Plan command | Apply behavior |
+| --- | --- | --- |
+| Metadata repair | `skills-audit metadata-repair --platform codex --skills-dir <root>` | Add `--apply` only when explicitly authorized |
+| Discover | `skills-audit audit --skills-dir <root>` | Read-only; add `--with-drift` only when remote fetch is intended |
+| Dedup | `skills-audit dedup --skills-dir <root>` | Apply relinks only identical hashes |
+| Route | `skills-audit route --platform <host> --skills-dir <root> --strategy archive` | Apply archives superseded variants by default |
+| Trace QA | `skills-audit audit-state-machine` | Read-only over route traces |
+| Mapped sync | `skills-audit sync --skills-dir <root> --map-file <file>` | Apply the reviewed mapping plan |
+| Close | repeat `audit` | Confirm final topology and metadata |
+
+The full maintenance order is:
+
+```text
+metadata-repair → audit → dedup → route → trace QA → optional sync → closing audit
+```
+
+Do not use `--strategy delete` unless the operator explicitly requested deletion. An apply request
+does not imply permission to delete.
+
+## Scope rules
+
+- Each `--skills-dir` is one host-visible install root. Duplicate-name checks recurse through the
+  whole root, including sibling packs.
+- Codex metadata requires fenced frontmatter with non-empty `name` and `description`.
+- `metadata-repair` handles only safe, idempotent repairs. Unsupported malformed frontmatter is
+  skipped and exits `5`.
+- `dedup` relinks same-hash definitions. Different hashes remain separate and move to `route`.
+- Host integration creates symlinks. An existing native entry is timestamp-archived before
+  linking; a matching link becomes `noop`.
+- Syntax, provenance, and lifecycle evidence do not prove semantic skill use or runtime behavior.
+
+## Configuration
 
 Template: [`config/skills-auditor.pipeline.example.env`](config/skills-auditor.pipeline.example.env).
 
 | Variable | Purpose |
 | --- | --- |
-| `SKILLS_AUDITOR_ROOTS` | Space-separated skill roots → expand to repeated `--skills-dir` |
-| `SKILLS_AUDITOR_EXTRA_ROOTS` | Optional extra roots appended to the list |
-| `SKILLS_AUDITOR_WITH_DRIFT` | `1` → add `--with-drift` on discover + close audits |
-| `SKILLS_AUDITOR_MODE` | `full` (default) \| `metadata-repair` \| `discover` \| `dedup` \| `route` \| `traces` \| `sync` \| `close` |
-| `SKILLS_AUDITOR_ROUTE_PLATFORMS` | Comma-separated, e.g. `cursor,codex` |
-| `SKILLS_AUDITOR_ROUTE_STRATEGY` | `archive` (default) \| `delete` \| `keep` |
-| `SKILLS_AUDITOR_SYNC_MAP_FILE` | If non-empty, sync cycle runs with this `--map-file` |
-| `SKILLS_AUDITOR_DISCOVERY_SOURCES` | Space-separated canonical source roots for discovery-driven sync; defaults to existing repo `.agents/.cursor/.claude` skill roots |
-| `SKILLS_AUDITOR_INSTALL_ROOTS` | Space-separated host discovery roots; defaults to repo `.codex/skills` when `.codex/` exists |
-| `SKILLS_AUDITOR_DRY_RUN` | `1` → **no** `--apply` on dedup / route / sync (overrides default apply) |
-| `SKILLS_AUDITOR_CONFIG` | Path to an env file to source for the above |
+| `SKILLS_AUDITOR_ROOTS` | Space-separated maintenance roots |
+| `SKILLS_AUDITOR_EXTRA_ROOTS` | Additional maintenance roots |
+| `SKILLS_AUDITOR_MODE` | `full`, `metadata-repair`, `discover`, `dedup`, `route`, `traces`, `sync`, or `close` |
+| `SKILLS_AUDITOR_APPLY` | `1` permits apply for the requested maintenance run |
+| `SKILLS_AUDITOR_DRY_RUN` | `1` forces plan-only behavior; compatibility override |
+| `SKILLS_AUDITOR_WITH_DRIFT` | `1` enables remote-backed drift checks |
+| `SKILLS_AUDITOR_ROUTE_PLATFORMS` | Comma-separated route platforms |
+| `SKILLS_AUDITOR_ROUTE_STRATEGY` | `archive` or `keep`; use `delete` only with explicit operator wording |
+| `SKILLS_AUDITOR_SYNC_MAP_FILE` | Optional authoritative map for the sync cycle |
+| `SKILLS_AUDITOR_CONFIG` | Environment file to source before resolving the above |
 
-**Default roots** when nothing is configured: `$HOME/.cursor/skills` and `$HOME/.claude/skills`.
+Default maintenance roots, when no configuration is supplied, are `~/.cursor/skills` and
+`~/.claude/skills`.
 
-### Shell helper (build `--skills-dir` args)
+## Sub-skill system
 
-```bash
-_roots="${SKILLS_AUDITOR_ROOTS:-$HOME/.cursor/skills $HOME/.claude/skills}"
-_roots="$_roots ${SKILLS_AUDITOR_EXTRA_ROOTS:-}"
-AUDIT_DIRS=()
-for d in $_roots; do
-  [ -d "$d" ] && AUDIT_DIRS+=(--skills-dir "$d")
-done
-DRIFT_FLAG=()
-[ "${SKILLS_AUDITOR_WITH_DRIFT:-0}" = "1" ] && DRIFT_FLAG=(--with-drift)
-```
-
-Use `"${AUDIT_DIRS[@]}"` and `"${DRIFT_FLAG[@]}"` in `skills-audit` invocations.
-
-## Sub-skill system (progressive disclosure)
-
-| Cycle | Sub-skill |
+| Cycle | Instructions |
 | --- | --- |
-| 0 — Metadata repair | built into `skills-audit metadata-repair` |
-| 1 — Discover | [`skills/discover/SKILL.md`](skills/discover/SKILL.md) |
-| 2 — Dedup | [`skills/dedup/SKILL.md`](skills/dedup/SKILL.md) |
-| 3 — Route | [`skills/route/SKILL.md`](skills/route/SKILL.md) |
-| 4 — Trace QA | [`skills/traces/SKILL.md`](skills/traces/SKILL.md) |
-| 5 — Sync (optional) | [`skills/sync/SKILL.md`](skills/sync/SKILL.md) |
-| 6 — Close | [`skills/close/SKILL.md`](skills/close/SKILL.md) |
+| Discover | [`skills/discover/SKILL.md`](skills/discover/SKILL.md) |
+| Dedup | [`skills/dedup/SKILL.md`](skills/dedup/SKILL.md) |
+| Route | [`skills/route/SKILL.md`](skills/route/SKILL.md) |
+| Trace QA | [`skills/traces/SKILL.md`](skills/traces/SKILL.md) |
+| Sync | [`skills/sync/SKILL.md`](skills/sync/SKILL.md) |
+| Close | [`skills/close/SKILL.md`](skills/close/SKILL.md) |
 
 Index: [`skills/README.md`](skills/README.md).
 
-## Execution ledger (optional compatibility layer)
+## Evidence and handoff
 
-Create a run ledger before a multi-step or delegated audit:
+Use execution ledgers for multi-step or delegated maintenance runs:
 
 ```bash
 skills-audit ledger-create --run-id <run-id> --source <orchestrator> --mode dry-run
-```
-
-Record each sub-skill or worker run as it completes:
-
-```bash
 skills-audit ledger-upsert --run-id <run-id> \
-  --id route-codex --class skill-run --locator "skills-audit route --platform codex" \
-  --owner skills-auditor-route --status completed
-
-skills-audit ledger-upsert --run-id <run-id> \
-  --id route-trace --class trace --locator ~/.skills-auditor/traces/<trace>.json \
-  --owner skills-auditor-route --status preserved
-```
-
-Before handoff or close, run:
-
-```bash
+  --id <resource-id> --class skill-run --locator <command-or-path> \
+  --owner <owner> --status completed
 skills-audit ledger-check --run-id <run-id>
 skills-audit ledger-summary --run-id <run-id>
 ```
 
-`active` rows produce warnings. `failed`, missing handoff target, missing
-blocked reason, or schema problems produce errors.
+Keep route traces as `trace` resources and plan/receipt files as `artifact` resources. Do not copy
+their payloads into the ledger.
 
-## Full pipeline recipe (agent-executable)
+## Isolation and safety
 
-**Default:** mutating steps use `--apply` unless `SKILLS_AUDITOR_DRY_RUN=1`.
+- Plan-only work can run in read-only isolation, except that route may write traces and integrate
+  writes a plan under `.skills-auditor-local/`.
+- Apply work needs write access to the exact source or target roots in scope.
+- Resolve every target before applying. Never use a home directory, repository root, or unresolved
+  variable as a destructive target.
+- A failed high-level apply writes a failed receipt with completed actions and the error when the
+  filesystem permits it.
 
-**Run with `bash`** (e.g. `bash -c '…'` or a `.sh` shebang). **Do not** paste into **zsh**: `read -r -a` is bash-only. With **`set -u`**, expanding an **empty** optional-args array (e.g. `"${APPLY_MUT[@]}"` when dry-run and `APPLY_MUT=()`) throws **unbound variable** on common bash builds — the recipe below uses **explicit `if` branches** for `--apply` instead of a toggle array.
+## Install
+
+From the repository:
 
 ```bash
-set -euo pipefail
-# Optional: set -a && source "$SKILLS_AUDITOR_CONFIG" && set +a
-
-MODE="${SKILLS_AUDITOR_MODE:-full}"
-_roots="${SKILLS_AUDITOR_ROOTS:-$HOME/.cursor/skills $HOME/.claude/skills}"
-_roots="$_roots ${SKILLS_AUDITOR_EXTRA_ROOTS:-}"
-AUDIT_DIRS=()
-for d in $_roots; do [ -d "$d" ] && AUDIT_DIRS+=(--skills-dir "$d"); done
-_sync_sources="${SKILLS_AUDITOR_DISCOVERY_SOURCES:-$PWD/.agents/skills $PWD/.cursor/skills $PWD/.claude/skills}"
-SYNC_SOURCES=()
-for d in $_sync_sources; do [ -d "$d" ] && SYNC_SOURCES+=(--source "$d"); done
-_sync_targets="${SKILLS_AUDITOR_INSTALL_ROOTS:-}"
-[ -n "$_sync_targets" ] || [ ! -d "$PWD/.codex" ] || _sync_targets="$PWD/.codex/skills"
-SYNC_TARGETS=()
-for d in $_sync_targets; do SYNC_TARGETS+=(--skills-dir "$d"); done
-DRIFT_FLAG=()
-[ "${SKILLS_AUDITOR_WITH_DRIFT:-1}" = "1" ] && DRIFT_FLAG=(--with-drift)
-RSTRAT="${SKILLS_AUDITOR_ROUTE_STRATEGY:-archive}"
-
-run_discover() {
-  if [ "${#DRIFT_FLAG[@]}" -eq 0 ]; then
-    skills-audit audit "${AUDIT_DIRS[@]}"
-  else
-    skills-audit audit "${AUDIT_DIRS[@]}" "${DRIFT_FLAG[@]}"
-  fi
-}
-run_close() { run_discover; }
-
-run_metadata_repair() {
-  if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" = "1" ]; then
-    skills-audit metadata-repair "${AUDIT_DIRS[@]}" --platform codex
-  else
-    skills-audit metadata-repair "${AUDIT_DIRS[@]}" --platform codex --apply
-  fi
-}
-
-run_dedup() {
-  if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" = "1" ]; then
-    skills-audit dedup "${AUDIT_DIRS[@]}"
-  else
-    skills-audit dedup "${AUDIT_DIRS[@]}" --apply
-  fi
-}
-
-run_traces() { skills-audit audit-state-machine; }
-
-run_sync() {
-  if [ -n "${SKILLS_AUDITOR_SYNC_MAP_FILE:-}" ]; then
-    if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" = "1" ]; then
-      skills-audit sync "${AUDIT_DIRS[@]}" --map-file "$SKILLS_AUDITOR_SYNC_MAP_FILE"
-    else
-      skills-audit sync "${AUDIT_DIRS[@]}" --map-file "$SKILLS_AUDITOR_SYNC_MAP_FILE" --apply
-    fi
-    return
-  fi
-  [ "${#SYNC_SOURCES[@]}" -gt 0 ] && [ "${#SYNC_TARGETS[@]}" -gt 0 ] || return 0
-  if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" = "1" ]; then
-    skills-audit sync-discover "${SYNC_SOURCES[@]}" "${SYNC_TARGETS[@]}"
-  else
-    skills-audit sync-discover "${SYNC_SOURCES[@]}" "${SYNC_TARGETS[@]}" --apply
-    for d in $_sync_targets; do AUDIT_DIRS+=(--skills-dir "$d"); done
-  fi
-}
-
-run_route_all() {
-  IFS=',' read -r -a plats <<< "${SKILLS_AUDITOR_ROUTE_PLATFORMS:-cursor,codex}"
-  for p in "${plats[@]}"; do
-    p="$(echo "$p" | xargs)"
-    [ -n "$p" ] || continue
-    if [ "${SKILLS_AUDITOR_DRY_RUN:-0}" = "1" ]; then
-      skills-audit route --platform "$p" "${AUDIT_DIRS[@]}" --strategy "$RSTRAT"
-    else
-      skills-audit route --platform "$p" "${AUDIT_DIRS[@]}" --strategy "$RSTRAT" --apply
-    fi
-  done
-}
-
-case "$MODE" in
-  metadata-repair) run_metadata_repair ;;
-  discover) run_discover ;;
-  dedup)    run_dedup ;;
-  route)    run_route_all ;;
-  traces)   run_traces ;;
-  sync)     run_sync ;;
-  close)    run_close ;;
-  full)
-    run_metadata_repair
-    run_discover
-    run_dedup
-    run_route_all
-    run_traces
-    run_sync
-    run_close
-    ;;
-  *) echo "Unknown SKILLS_AUDITOR_MODE=$MODE" >&2; exit 1 ;;
-esac
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install .
+skills-audit --version
 ```
 
-## Isolation
-
-**Apply runs change the filesystem** — do **not** use `readonly` subagents for the default `/skills-auditor` pass. Use **readonly** only when the operator asked for **dry-run** / `SKILLS_AUDITOR_DRY_RUN=1`. See [Isolation Harness Recommendations](https://github.com/ERerGB/skills-auditor#isolation-harness-recommendations).
-
-## Safety rules (this skill contract)
-
-- **`/skills-auditor` default:** `metadata-repair`, `dedup`, `route`, and `sync` run with **`--apply`** when the user does **not** ask for dry-run.
-- **Opt out:** explicit “dry run” / “preview only” / **`SKILLS_AUDITOR_DRY_RUN=1`** → omit `--apply`.
-- **Destructive strategy:** `SKILLS_AUDITOR_ROUTE_STRATEGY=delete` removes files; only use when the operator is explicit.
-
-## CLI install
-
-`pip install -e .` from this repo, or `python3 scripts/skills_audit.py` from the repo root. Full command reference lives in sub-skills and in [`README.md`](README.md).
+Use `python -m pip install -e .` only when developing skills-auditor itself. The no-install entry
+is `python3 scripts/skills_audit.py`.

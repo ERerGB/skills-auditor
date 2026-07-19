@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from skills_auditor import __version__
 from skills_auditor.environments import BUILTIN_ENVIRONMENTS, builtin_project_skill_roots
 from skills_auditor.ledger import DEFAULT_LEDGER_ROOT, VALID_RESOURCE_CLASSES, VALID_STATUSES
 
@@ -1361,6 +1362,40 @@ def file_hash(path: Path) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def directory_tree_hash(root: Path, *, reject_external_symlinks: bool = False) -> str:
+    """Hash a directory's complete, non-following filesystem tree.
+
+    Regular-file bytes and permission bits are covered. Symlinks contribute their
+    literal link target and are never followed, so hashing cannot escape ``root``.
+    """
+
+    records: List[List[str]] = []
+    resolved_root = root.resolve(strict=False)
+
+    def walk(current: Path) -> None:
+        for path in sorted(current.iterdir(), key=lambda item: item.name):
+            relative = path.relative_to(root).as_posix()
+            mode = format(path.lstat().st_mode & 0o7777, "04o")
+            if path.is_symlink():
+                if reject_external_symlinks:
+                    try:
+                        path.resolve(strict=False).relative_to(resolved_root)
+                    except ValueError as exc:
+                        raise ValueError(f"source symlink escapes skill tree: {path}") from exc
+                records.append(["symlink", relative, mode, os.readlink(path)])
+            elif path.is_dir():
+                records.append(["directory", relative, mode])
+                walk(path)
+            elif path.is_file():
+                records.append(["file", relative, mode, file_hash(path)])
+            else:
+                records.append(["other", relative, mode])
+
+    walk(root)
+    payload = json.dumps(records, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def is_path_excluded(path: Path, excluded_roots: List[Path]) -> bool:
     abs_path = path.resolve()
     for ex in excluded_roots:
@@ -1770,10 +1805,10 @@ def discover_sync_mapping(
                 continue
             seen_resolved.add(resolved_str)
 
-            content_hash = file_hash(skill_md)
+            content_hash = directory_tree_hash(resolved)
             previous = by_alias.get(alias)
             if previous and previous[0] != resolved_str:
-                previous_hash = file_hash(Path(previous[0]) / "SKILL.md")
+                previous_hash = directory_tree_hash(Path(previous[0]))
                 if previous_hash != content_hash:
                     conflicts.append(f"{alias}: {previous[0]} vs {resolved_str}")
                     continue
@@ -2099,7 +2134,82 @@ def print_drift_report(drifts: List[DriftStatus]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Audit and sync local skill folders.")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_integrate = sub.add_parser(
+        "integrate",
+        help="Create and save a reviewable integration plan for named host targets",
+    )
+    p_integrate.add_argument(
+        "--config",
+        default="",
+        help="Integration spec JSON (default: ./skills-auditor.json when present).",
+    )
+    p_integrate.add_argument(
+        "--source",
+        action="append",
+        default=[],
+        help="Canonical SKILL.md source root. Repeatable; overrides config sources.",
+    )
+    p_integrate.add_argument(
+        "--target",
+        action="append",
+        default=[],
+        help="Named host target, optionally @global (cursor, claude-code, codex). Repeatable.",
+    )
+    p_integrate.add_argument(
+        "--target-root",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help="Custom host target root. Repeatable.",
+    )
+    p_integrate.add_argument(
+        "--metadata-platform",
+        default="",
+        help="Metadata profile override (default: config value or codex).",
+    )
+    p_integrate.add_argument(
+        "--plan-out",
+        default="",
+        help="Plan output path (default: .skills-auditor-local/plans/<plan-id>.json).",
+    )
+    p_integrate.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format; json writes one JSON object to stdout.",
+    )
+
+    p_apply_plan = sub.add_parser(
+        "apply",
+        help="Apply one reviewed integration plan without rediscovering sources",
+    )
+    p_apply_plan.add_argument("plan", help="Path to a skills-auditor-plan/v1 JSON file.")
+    p_apply_plan.add_argument(
+        "--receipt-out",
+        default="",
+        help="Receipt output path (default: .skills-auditor-local/receipts/<receipt-id>.json).",
+    )
+    p_apply_plan.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format; json writes one JSON object to stdout.",
+    )
+
+    p_verify_receipt = sub.add_parser(
+        "verify",
+        help="Verify installed links and source-tree hashes from an integration receipt",
+    )
+    p_verify_receipt.add_argument("receipt", help="Path to a skills-auditor-receipt/v1 JSON file.")
+    p_verify_receipt.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format; json writes one JSON object to stdout.",
+    )
 
     p_audit = sub.add_parser("audit", help="Audit current skills directory state")
     p_audit.add_argument(
@@ -2635,6 +2745,127 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.command == "integrate":
+        from skills_auditor.integration import (
+            IntegrationError,
+            build_integration_plan,
+            load_integration_spec,
+            save_plan,
+        )
+
+        try:
+            spec = load_integration_spec(
+                config_path=Path(args.config) if args.config else None,
+                cli_sources=args.source,
+                cli_targets=args.target,
+                cli_target_roots=args.target_root,
+                metadata_platform=args.metadata_platform,
+            )
+            plan = build_integration_plan(spec)
+            plan_path = save_plan(plan, Path(args.plan_out) if args.plan_out else None)
+        except IntegrationError as exc:
+            if args.format == "json":
+                print(json.dumps(exc.to_dict(), indent=2, ensure_ascii=False))
+            else:
+                print(f"error [{exc.code}]: {exc}", file=sys.stderr)
+                for detail in exc.details:
+                    print(f"  {json.dumps(detail, ensure_ascii=False)}", file=sys.stderr)
+            return exc.exit_code
+
+        if args.format == "json":
+            output = dict(plan)
+            output["plan_path"] = str(plan_path)
+            print(json.dumps(output, indent=2, ensure_ascii=False))
+            return 0
+
+        summary = plan["summary"]
+        print(f"plan: {plan_path}")
+        print(f"plan id: {plan['plan_id']}")
+        print(
+            f"skills: {summary['skills']} | targets: {summary['targets']} | "
+            f"actions: {summary['actions']} | changes: {summary['changes']}"
+        )
+        for target in plan["targets"]:
+            counts: Dict[str, int] = {}
+            for action in target["actions"]:
+                name = action["action"]
+                counts[name] = counts.get(name, 0) + 1
+            print(
+                f"  {target['environment']}@{target['scope']}: {target['root']} "
+                f"{json.dumps(counts, sort_keys=True)}"
+            )
+        print("\nReview the plan, then apply that exact file:")
+        print(f"  skills-audit apply {plan_path}")
+        return 0
+
+    if args.command == "apply":
+        from skills_auditor.integration import (
+            IntegrationError,
+            apply_integration_plan,
+            load_json_object,
+        )
+
+        try:
+            plan = load_json_object(Path(args.plan), "plan")
+            receipt, receipt_path = apply_integration_plan(
+                plan,
+                Path(args.receipt_out) if args.receipt_out else None,
+            )
+        except IntegrationError as exc:
+            if args.format == "json":
+                print(json.dumps(exc.to_dict(), indent=2, ensure_ascii=False))
+            else:
+                print(f"error [{exc.code}]: {exc}", file=sys.stderr)
+                for detail in exc.details:
+                    print(f"  {json.dumps(detail, ensure_ascii=False)}", file=sys.stderr)
+            return exc.exit_code
+
+        if args.format == "json":
+            output = dict(receipt)
+            output["receipt_path"] = str(receipt_path)
+            print(json.dumps(output, indent=2, ensure_ascii=False))
+        else:
+            print(f"receipt: {receipt_path}")
+            print(f"receipt id: {receipt['receipt_id']}")
+            print(f"plan id: {receipt['plan_id']}")
+            print(f"status: {receipt['status']} | verified entries: {len(receipt['results'])}")
+            print("\nVerify the installed state:")
+            print(f"  skills-audit verify {receipt_path}")
+        return 0
+
+    if args.command == "verify":
+        from skills_auditor.integration import (
+            IntegrationError,
+            load_json_object,
+            verify_receipt,
+        )
+
+        try:
+            receipt = load_json_object(Path(args.receipt), "receipt")
+            verification = verify_receipt(receipt)
+        except IntegrationError as exc:
+            if args.format == "json":
+                print(json.dumps(exc.to_dict(), indent=2, ensure_ascii=False))
+            else:
+                print(f"error [{exc.code}]: {exc}", file=sys.stderr)
+                for detail in exc.details:
+                    print(f"  {json.dumps(detail, ensure_ascii=False)}", file=sys.stderr)
+            return exc.exit_code
+
+        if args.format == "json":
+            print(json.dumps(verification, indent=2, ensure_ascii=False))
+        else:
+            summary = verification["summary"]
+            print(f"status: {verification['status']}")
+            print(
+                f"checks: {summary['checks']} | passed: {summary['passed']} | "
+                f"failed: {summary['failed']}"
+            )
+            for check in verification["checks"]:
+                if not check.get("ok"):
+                    print(f"  FAIL {check['code']}: {json.dumps(check, ensure_ascii=False)}")
+        return 0 if verification["status"] == "passed" else 3
 
     if args.command == "audit":
         duplicate_exit = False

@@ -1,51 +1,55 @@
-# Install skills-auditor safely
+# Install skills-auditor
 
-The recommended install path is a local clone plus virtualenv. This keeps the tool reversible and avoids writing into a system Python environment.
+Python 3.9 or newer is required. The package has no runtime dependencies outside the standard
+library.
 
-## Virtualenv install
+## Isolated install from GitHub
+
+Use `pipx` for a global CLI without coupling it to a project environment:
+
+```bash
+pipx install git+https://github.com/ERerGB/skills-auditor.git
+skills-audit --version
+```
+
+## Virtual environment
 
 ```bash
 git clone https://github.com/ERerGB/skills-auditor.git
 cd skills-auditor
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+python -m pip install .
+skills-audit --version
 ```
 
-This installs the `skills-audit` console script and enables:
+Use `python -m pip install -e .` only when developing skills-auditor itself.
+
+## No-install entry
+
+From a repository checkout:
 
 ```bash
-python3 -m skills_auditor
+python3 scripts/skills_audit.py --help
 ```
 
-## Verify the install
+The module entry is equivalent:
 
 ```bash
-skills-audit audit --skills-dir "$HOME/.cursor/skills"
+python3 -m skills_auditor --help
 ```
 
-If the command is not found, either reactivate the virtualenv or run directly from the repo:
+## Upgrade
 
 ```bash
-python3 scripts/skills_audit.py audit --skills-dir "$HOME/.cursor/skills"
+pipx upgrade skills-auditor
 ```
 
-## Optional pipx install
+For a Git URL install, reinstall from the desired tag or commit when the environment does not
+resolve upgrades automatically.
 
-From the repo root:
+## Verify package contents
 
-```bash
-pipx install .
-```
-
-Use `pipx` when you want a global CLI without coupling it to a project virtualenv.
-
-## Safety boundary
-
-`audit`, `audit-discovery`, and metadata validation are inspection commands. Sync commands are dry-run by default until `--apply` is passed.
-
-For the agent skill pack, set this environment variable when you want to force dry-run behavior:
-
-```bash
-export SKILLS_AUDITOR_DRY_RUN=1
-```
+The release version has one source of truth in `skills_auditor/_version.py`. Distribution builds
+include the MIT [`LICENSE`](../LICENSE), documentation, configuration examples, and versioned JSON
+Schemas. Maintainers can run the complete [release gate](releasing.md).

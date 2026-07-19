@@ -1,8 +1,8 @@
 ---
 name: skills-auditor-dedup
 description: >
-  Skills Auditor cycle 2 — skills-audit dedup; top entry defaults to --apply unless dry-run.
-  Hash-aware fold when duplicate names share content. Sub-skill of skills-auditor.
+  Skills Auditor cycle 2 — plan-first hash-aware deduplication. Applies only when the operator
+  explicitly authorizes writes. Sub-skill of skills-auditor.
 ---
 
 # Skills Auditor — Dedup (cycle 2)
@@ -16,7 +16,8 @@ description: >
 
 - Dedup scans the **entire** install root passed to `--skills-dir` (Slash-style recursive view), so it catches both in-pack mirrors and **sibling-folder** duplicates (e.g. `browse/` vs `gstack/browse/`).
 - **Different hashes** → dedup reports `skip_multi_version`; use **route** sub-skill instead.
-- **Top skill default:** `/skills-auditor` runs dedup **with** `--apply` unless the operator asks for dry-run or sets `SKILLS_AUDITOR_DRY_RUN=1`.
+- **Top skill default:** `/skills-auditor` plans dedup. It adds `--apply` only after explicit
+  authorization or `SKILLS_AUDITOR_APPLY=1`; `SKILLS_AUDITOR_DRY_RUN=1` always suppresses apply.
 
 ## Commands
 
@@ -24,7 +25,7 @@ description: >
 # Plan only
 skills-audit dedup --skills-dir "$HOME/.cursor/skills"
 
-# Default /skills-auditor style (apply)
+# Explicit apply
 skills-audit dedup --skills-dir "$HOME/.cursor/skills" --skills-dir "$HOME/.claude/skills" --apply
 ```
 

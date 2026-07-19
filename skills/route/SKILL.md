@@ -1,8 +1,8 @@
 ---
 name: skills-auditor-route
 description: >
-  Skills Auditor cycle 3 — Select-One routing per platform; top entry defaults to --apply unless
-  dry-run. Writes JSON traces under ~/.skills-auditor/traces/. Sub-skill of skills-auditor.
+  Skills Auditor cycle 3 — plan-first Select-One routing per platform. Writes JSON traces under
+  ~/.skills-auditor/traces/ and applies only with explicit authorization.
 ---
 
 # Skills Auditor — Route (cycle 3)

@@ -1,6 +1,44 @@
 # Examples and recipes
 
-Use these command shapes as starting points. Keep them in dry-run mode until the output is boring and expected.
+Use the high-level transaction for host integration. The primitive commands below it are for
+diagnosis and maintenance.
+
+## Integrate one source into one host
+
+```bash
+skills-audit integrate --source .agents/skills --target codex
+```
+
+The output contains the saved plan path and exact apply command.
+
+## Integrate from repository configuration
+
+```bash
+cp config/skills-auditor.integration.example.json skills-auditor.json
+skills-audit integrate
+```
+
+## Target global and custom roots
+
+```bash
+skills-audit integrate \
+  --source .agents/skills \
+  --target cursor@global \
+  --target-root acme="$HOME/.acme/skills"
+```
+
+## Machine-readable plan
+
+```bash
+skills-audit integrate \
+  --source .agents/skills \
+  --target codex \
+  --format json \
+  --plan-out .skills-auditor-local/plan.json
+```
+
+JSON mode returns `0` even when changes are planned. Inspect `summary.changes` instead of treating
+ordinary drift as a process failure.
 
 ## Inspect one install root
 
@@ -8,51 +46,16 @@ Use these command shapes as starting points. Keep them in dry-run mode until the
 skills-audit audit --skills-dir "$HOME/.cursor/skills"
 ```
 
-## Inspect Cursor and Claude Code together
+## Inspect multiple install roots
 
 ```bash
 skills-audit audit \
   --skills-dir "$HOME/.cursor/skills" \
-  --skills-dir "$HOME/.claude/skills"
-```
-
-## Fail on duplicate skill names
-
-```bash
-skills-audit audit \
   --skills-dir "$HOME/.claude/skills" \
   --fail-on-duplicate-names
 ```
 
-## Preview mapped sync
-
-```bash
-skills-audit sync \
-  --skills-dir "$HOME/.cursor/skills" \
-  --map-file config/sources.example.json
-```
-
-Add `--apply` only after reviewing the dry-run plan.
-
-## Preview discovery-driven sync
-
-```bash
-skills-audit sync-discover \
-  --source .agents/skills \
-  --source .cursor/skills \
-  --skills-dir .codex/skills
-```
-
-## Use a discovery profile
-
-```bash
-skills-audit audit-discovery \
-  --profile-file config/discovery-profile.gstack-multiplatform.example.json
-```
-
-Discovery profiles let the management layer describe which source roots apply to Cursor, Claude Code, or all targets.
-
-## Repair metadata in dry-run mode
+## Repair metadata
 
 ```bash
 skills-audit metadata-repair \
@@ -60,36 +63,41 @@ skills-audit metadata-repair \
   --skills-dir "$HOME/.codex/skills"
 ```
 
-Run again with `--apply` only after reading the proposed edits.
+Review the plan, then repeat with `--apply` only when that direct source edit is intended.
+
+## Audit discovery policy
+
+```bash
+skills-audit audit-discovery \
+  --profile-file config/discovery-profile.gstack-multiplatform.example.json \
+  --fail-on-conflict \
+  --fail-on-hash-conflict
+```
+
+## Legacy mapped sync
+
+```bash
+skills-audit sync \
+  --skills-dir "$HOME/.cursor/skills" \
+  --map-file config/sources.example.json
+```
+
+Mapped sync remains useful for an existing curated map. New integrations should prefer
+`integrate` so apply consumes a versioned plan.
 
 ## Record a delegated run ledger
 
 ```bash
-RUN_ID="skills-auditor-$(date -u +%Y%m%dT%H%M%SZ)"
-
-skills-audit ledger-create \
-  --run-id "$RUN_ID" \
-  --source issue-lifecycle-router \
-  --mode apply
+skills-audit ledger-create --run-id run-1 --source orchestrator --mode dry-run
 
 skills-audit ledger-upsert \
-  --run-id "$RUN_ID" \
-  --id route-codex \
-  --class skill-run \
-  --locator "skills-audit route --platform codex --strategy archive --apply" \
-  --owner skills-auditor-route \
-  --status completed
-
-skills-audit ledger-upsert \
-  --run-id "$RUN_ID" \
-  --id route-trace-codex \
-  --class trace \
-  --locator "$HOME/.skills-auditor/traces/<trace-id>.json" \
-  --owner skills-auditor-route \
+  --run-id run-1 \
+  --id integration-plan \
+  --class artifact \
+  --locator .skills-auditor-local/plans/<plan-id>.json \
+  --owner skills-auditor \
   --status preserved
 
-skills-audit ledger-check --run-id "$RUN_ID"
-skills-audit ledger-summary --run-id "$RUN_ID"
+skills-audit ledger-check --run-id run-1
+skills-audit ledger-summary --run-id run-1
 ```
-
-Use `--status handoff --handoff-target <target>` when another operator or agent must continue. Use `--status blocked --blocked-reason <reason>` when the run cannot close.

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/integration-spec-v1.schema.json",
+  "title": "Skills Auditor Integration Spec v1",
+  "type": "object",
+  "required": ["schema_version", "sources", "targets"],
+  "properties": {
+    "schema_version": {"const": "skills-auditor-integration/v1"},
+    "project_root": {"type": "string"},
+    "metadata_platform": {"type": "string", "minLength": 1},
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {"type": "string", "minLength": 1},
+          {
+            "type": "object",
+            "required": ["environment"],
+            "properties": {
+              "environment": {"type": "string", "minLength": 1},
+              "scope": {"enum": ["project", "global"]},
+              "root": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  "additionalProperties": false
+}

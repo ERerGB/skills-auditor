@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/error-v1.schema.json",
+  "title": "Skills Auditor Error v1",
+  "type": "object",
+  "required": ["schema_version", "status", "error"],
+  "properties": {
+    "schema_version": {"const": "skills-auditor-error/v1"},
+    "status": {"const": "error"},
+    "error": {
+      "type": "object",
+      "required": ["code", "message", "details"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1},
+        "details": {"type": "array", "items": {"type": "object"}}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

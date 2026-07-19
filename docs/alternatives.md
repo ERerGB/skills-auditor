@@ -42,6 +42,7 @@ Weakness:
 - A local root has a mixture of copied folders and symlinks.
 - You need dry-run evidence before changing filesystem state.
 - You want a repeatable audit gate in CI.
+- You need apply to consume the exact source and target state that was reviewed.
 
 ## Escape hatch
 

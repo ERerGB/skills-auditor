@@ -1,22 +1,41 @@
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "skills-auditor"
-version = "0.6.0"
-description = "Audit and synchronize local AI skill folders (Cursor, Claude Code, etc.)"
+dynamic = ["version"]
+description = "Plan, apply, and verify local AI skill integrations across agent hosts"
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 keywords = ["cursor", "claude", "skills", "agents", "symlink"]
 authors = [{ name = "skills-auditor contributors" }]
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
 
 [project.urls]
 Homepage = "https://github.com/ERerGB/skills-auditor"
+Documentation = "https://github.com/ERerGB/skills-auditor#readme"
+Issues = "https://github.com/ERerGB/skills-auditor/issues"
+Source = "https://github.com/ERerGB/skills-auditor"
 
 [project.scripts]
 skills-audit = "skills_auditor.cli:main"
+
+[project.optional-dependencies]
+test = ["jsonschema>=4.23,<5"]
+
+[tool.hatch.version]
+path = "skills_auditor/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["skills_auditor"]
@@ -27,6 +46,9 @@ include = [
   "/config",
   "/docs",
   "/scripts",
+  "/tests",
+  "/skills_auditor/schemas",
+  "/LICENSE",
   "/README.md",
   "/SKILL.md",
 ]

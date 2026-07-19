@@ -1,0 +1,12 @@
+{
+  "sources": [
+    {"path": ".agents/skills", "platform": ["cursor", "claude-code", "codex"]},
+    {"path": ".cursor/skills", "platform": ["cursor"]},
+    {"path": ".claude/skills", "platform": ["claude-code"]},
+    {"path": ".codex/skills", "platform": ["codex"]}
+  ],
+  "exclude_sources": [
+    ".cursor/plugins/cache"
+  ],
+  "collapse_identical": true
+}
