@@ -2132,8 +2132,11 @@ def print_drift_report(drifts: List[DriftStatus]) -> None:
     print(json.dumps([asdict(d) for d in drifts], indent=2, ensure_ascii=False))
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Audit and sync local skill folders.")
+def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description="Audit and sync local skill folders.",
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -2742,8 +2745,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    parser = build_parser()
+def main(prog: Optional[str] = None) -> int:
+    parser = build_parser(prog=prog)
     args = parser.parse_args()
 
     if args.command == "integrate":

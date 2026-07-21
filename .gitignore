@@ -5,6 +5,9 @@ dist/
 build/
 .venv/
 .skills-auditor-local/
+.coverage
+coverage.xml
+htmlcov/
 *.pyc
 *.pyo
 *.pyd

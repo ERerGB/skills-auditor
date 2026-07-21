@@ -11,17 +11,22 @@ From a clean checkout:
 python3 -m venv .release-venv
 source .release-venv/bin/activate
 python -m pip install ".[test]" build
-python -m unittest discover -s tests -v
+python -m coverage run -m unittest discover -s tests -v
+python -m coverage report
 python scripts/check_markdown.py
 
 SA_RELEASE_DIST="$(mktemp -d)"
 python -m build --outdir "$SA_RELEASE_DIST"
 python scripts/check_distribution.py "$SA_RELEASE_DIST"
+python scripts/run_artifact_tests.py smoke "$SA_RELEASE_DIST"
+python scripts/run_artifact_tests.py e2e "$SA_RELEASE_DIST"
 ```
 
 The checker rejects a wheel or source distribution that omits the CLI, high-level integration
-module, versioned JSON schemas, license, README, agent skill, integration example, or contract.
-It also checks the wheel version, SPDX license metadata, license file, and console entry point.
+module, versioned JSON schemas, license, README, agent skill, integration example, contract, artifact
+runner, or packaged Smoke/E2E suites. It also checks the wheel version, SPDX license metadata,
+license file, and console entry point. The artifact runner then proves that the exact wheel can be
+installed and operated outside the source checkout.
 
 ## Tag
 

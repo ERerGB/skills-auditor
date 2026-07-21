@@ -176,6 +176,8 @@ def load_traces(trace_dir: Optional[Path] = None) -> List[RunTrace]:
     for p in sorted(src.glob("*.json")):
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                continue
             identities = []
             for ident in data.get("identities", []):
                 transitions = [StateTransition(**t) for t in ident.get("transitions", [])]

@@ -467,6 +467,16 @@ def load_trigger_logs(
                         )
                     )
                     continue
+                if not isinstance(event, dict):
+                    findings.append(
+                        LogAuditFinding(
+                            check="invalid_event",
+                            severity="error",
+                            detail=f"{path}:{lineno}: event must be a JSON object",
+                            path=str(path),
+                        )
+                    )
+                    continue
                 event["_log_path"] = str(path)
                 events.append(event)
     return events, findings
@@ -498,6 +508,14 @@ def load_sensor_events(
                         check="invalid_json",
                         severity="error",
                         detail=f"{path}:{lineno}: {exc}",
+                        path=str(path),
+                    ))
+                    continue
+                if not isinstance(event, dict):
+                    findings.append(LogAuditFinding(
+                        check="invalid_event",
+                        severity="error",
+                        detail=f"{path}:{lineno}: event must be a JSON object",
                         path=str(path),
                     ))
                     continue

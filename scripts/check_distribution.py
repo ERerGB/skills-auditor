@@ -84,6 +84,9 @@ def check_sdist(path: Path) -> None:
             prefix + "docs/releasing.md",
             prefix + "scripts/check_distribution.py",
             prefix + "scripts/check_markdown.py",
+            prefix + "scripts/run_artifact_tests.py",
+            prefix + "smoke_tests/test_installed_distribution.py",
+            prefix + "e2e_tests/test_installed_cli_lifecycle.py",
             prefix + "tests/test_integration.py",
         }
     )

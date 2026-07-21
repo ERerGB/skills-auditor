@@ -3,14 +3,47 @@
 CI should validate sources, create machine-readable plans, and verify receipts. Applying to a
 persistent developer home directory is an operational action, not a test.
 
-## Repository test gate
+## Test layers
+
+Each layer crosses a different boundary. Passing a narrower layer is not evidence for a wider one.
+
+### Unit and contract gate
 
 ```bash
-python3 -m unittest discover -s tests -v
+python3 -m coverage run -m unittest discover -s tests -v
+python3 -m coverage report
 ```
 
-The repository's [CI workflow](../.github/workflows/ci.yml) installs the package and runs the suite
-on Python 3.9 through 3.14. Its distribution job also builds both package formats and runs
+The source suite covers module behavior, command dispatch, validation, rollback, corrupted evidence,
+and failure receipts. Branch-aware coverage must remain at or above 90%. CI runs this gate on Python
+3.9 through 3.14.
+
+### Clean-wheel smoke gate
+
+```bash
+python3 -m build
+python3 scripts/run_artifact_tests.py smoke dist
+```
+
+The runner creates a disposable virtual environment, installs the wheel without dependencies,
+copies the smoke suite outside the checkout, removes `PYTHONPATH` and `PYTHONHOME`, then checks the
+installed import, version, help text, module entry point, and `skills-audit` console script. A
+directory argument must contain exactly one `skills_auditor-*.whl`; pass an exact wheel path when a
+local `dist/` contains older builds.
+
+### Installed-CLI E2E gate
+
+```bash
+python3 scripts/run_artifact_tests.py e2e dist
+```
+
+The E2E suite invokes only the console script installed from the wheel. It exercises
+`integrate → apply → verify → noop` across Cursor, Claude Code, and Codex project and global roots,
+plus stale-plan rejection, archive behavior, and source-drift verification. CI runs it on Linux and
+macOS. This establishes the filesystem integration contract; it does not launch downstream host
+applications or claim model-level behavioral parity.
+
+The distribution job separately builds both package formats, checks Markdown links, and runs
 `scripts/check_distribution.py`.
 
 ## Source contract gate

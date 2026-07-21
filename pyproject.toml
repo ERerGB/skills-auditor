@@ -32,7 +32,10 @@ Source = "https://github.com/ERerGB/skills-auditor"
 skills-audit = "skills_auditor.cli:main"
 
 [project.optional-dependencies]
-test = ["jsonschema>=4.23,<5"]
+test = [
+  "coverage[toml]>=7.6,<8",
+  "jsonschema>=4.23,<5",
+]
 
 [tool.hatch.version]
 path = "skills_auditor/_version.py"
@@ -45,10 +48,22 @@ include = [
   "/skills_auditor",
   "/config",
   "/docs",
+  "/e2e_tests",
   "/scripts",
+  "/smoke_tests",
   "/tests",
   "/skills_auditor/schemas",
   "/LICENSE",
   "/README.md",
   "/SKILL.md",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["skills_auditor"]
+
+[tool.coverage.report]
+fail_under = 90
+precision = 1
+show_missing = true
+skip_covered = true

@@ -97,6 +97,7 @@ host-native symlink; rerunning `integrate` against that state produces `noop`.
 | Definition provenance | A target link resolves to the reviewed canonical tree |
 | Payload integrity | The complete in-tree payload still matches its reviewed SHA-256 snapshot |
 | Lifecycle evidence | Plans, receipts, route traces, and ledgers satisfy their structural contracts |
+| Host path contract | Installed-wheel E2E covers Cursor, Claude Code, and Codex project/global roots on Linux and macOS |
 | Behavioral parity | **Not established**; requires downstream host and model integration tests |
 
 Built-in target names resolve to native roots without repeating path conventions:
@@ -310,7 +311,12 @@ receipts and audit the listed roots before replanning.
 ### Quality gates
 
 ```bash
-python3 -m unittest discover -s tests -v
+python3 -m coverage run -m unittest discover -s tests -v
+python3 -m coverage report
+
+python3 -m build
+python3 scripts/run_artifact_tests.py smoke dist
+python3 scripts/run_artifact_tests.py e2e dist
 
 skills-audit audit \
   --skills-dir .agents/skills \
@@ -321,9 +327,10 @@ skills-audit verify .skills-auditor-local/receipts/<receipt-id>.json \
   --format json
 ```
 
-The repository [CI workflow](.github/workflows/ci.yml) installs and tests the package on Python
-3.9–3.14. A separate job builds the wheel and source distribution, then checks version metadata,
-the console entry point, license, schemas, integration contract, and packaged integration example.
+The repository [CI workflow](.github/workflows/ci.yml) enforces at least 90% branch-aware coverage on
+Python 3.9–3.14, installs the built wheel into clean environments for Smoke tests, and runs the real
+console-script E2E lifecycle on Linux and macOS. A separate distribution job checks version metadata,
+the console entry point, license, schemas, integration contract, packaged tests, and examples.
 
 ### Failure semantics
 
