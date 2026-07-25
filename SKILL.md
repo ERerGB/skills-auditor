@@ -1,35 +1,78 @@
 ---
 name: skills-auditor
 description: >
-  Plan-first entry for auditing and integrating local AI skill roots. Generic invocations never
-  change skill definitions or install roots unless the operator explicitly requests apply or sets
-  SKILLS_AUDITOR_APPLY=1. Uses versioned plans and receipts for host integration.
+  Chat-native, plan-first governance for auditing and bringing the same AI skills to local
+  workspaces. The agent chooses the integration or maintenance path from the operator's goal,
+  presents a reviewable plan, waits for explicit approval, applies only the reviewed scope, and
+  verifies the result.
 ---
 
 # Skills Auditor
 
-> Inspect first. Apply only the state the operator reviewed.
+> Bring the same AI skills to every workspace.
+
+Ask once. Review the plan. Approve the change. Get a verified result.
+
+## Interaction contract
+
+Treat `/skills-auditor` as the product entry point, not as a request for the
+operator to select CLI primitives. Translate the operator's goal into the
+smallest safe workflow:
+
+| Operator goal | Preferred path |
+| --- | --- |
+| “Bring these skills to this workspace” | Integrate canonical sources into the current host |
+| “Audit the skills in this workspace” | Inspect active roots and plan the relevant maintenance |
+| “Fix metadata, duplicates, or variants” | Run only the matching maintenance cycle |
+| “Sync this authoritative mapping” | Run mapped sync against the named map |
+
+Do not lead with cycle names, flags, plan IDs, or schemas. First explain the
+observed state and intended result in the operator's language; show commands and
+artifacts as review evidence.
+
+Use one visible lifecycle:
+
+1. **Inspect** — resolve the current workspace, host, canonical sources, and
+   host-visible skill roots. State material assumptions.
+2. **Plan** — run the appropriate plan-only command and summarize what is
+   already aligned, what would change, and what would remain untouched.
+3. **Approve** — pause before mutation. Make the target scope, archival behavior,
+   network side effects, and any deletion explicit. A generic apply request never
+   authorizes deletion.
+4. **Apply** — after explicit approval, execute the reviewed plan or exact
+   maintenance scope. Do not broaden the target or rediscover a high-level
+   integration plan.
+5. **Verify** — verify automatically after apply and return the receipt,
+   resulting topology, unresolved findings, and a concise outcome.
+
+If the plan contains no actions, report the zero-change plan as already aligned
+and stop. Do not manufacture apply, receipt, or verification steps.
 
 ## Default behavior
 
 When the operator invokes `/skills-auditor` without a narrower request:
 
 1. Load `SKILLS_AUDITOR_CONFIG` when it points to an environment file.
-2. Run the requested cycle, or the full maintenance pipeline when
-   `SKILLS_AUDITOR_MODE` is unset or `full`.
-3. Keep definition and install-root changes in plan mode by default.
-4. Pass `--apply` only when the operator explicitly asks to apply changes or
+2. Infer integration or maintenance intent from the request and current
+   workspace. Prefer the high-level `integrate` transaction for adoption.
+3. Use the requested cycle, or the full maintenance pipeline only for a broad
+   audit request when `SKILLS_AUDITOR_MODE` is unset or `full`.
+4. Keep definition and install-root changes in plan mode by default.
+5. Pass `--apply` only when the operator explicitly asks to apply changes or
    `SKILLS_AUDITOR_APPLY=1`.
-5. `SKILLS_AUDITOR_DRY_RUN=1` is a compatibility override that always suppresses apply.
+6. `SKILLS_AUDITOR_DRY_RUN=1` is a compatibility override that always suppresses apply.
 
 `route` dry-runs still write trace evidence. `audit --with-drift` still fetches Git remotes.
-Neither side effect changes a skill definition or install root.
+Disclose those side effects before running them. Neither changes a skill
+definition or install root.
 
 ## Choose one path
 
 ### Integrate canonical sources into hosts
 
-Prefer the high-level transaction for adoption and host registration:
+Prefer the high-level transaction for adoption and host registration. Infer the
+current project host when it is unambiguous; otherwise present the resolved
+choices in user-facing names before asking for a target.
 
 ```bash
 skills-audit integrate \
@@ -39,6 +82,14 @@ skills-audit integrate \
 
 The command exits `0`, writes a `skills-auditor-plan/v1` file under
 `.skills-auditor-local/plans/`, and prints the exact apply command. It does not change the target.
+
+Present the plan as a short operator summary before showing the artifact:
+
+- source skills being adopted;
+- destination workspace and host;
+- entries that will link, archive, or remain unchanged;
+- explicit exclusions and safety constraints;
+- exact approval phrase or apply command.
 
 Only after an explicit apply request:
 
@@ -50,6 +101,9 @@ skills-audit verify .skills-auditor-local/receipts/<receipt-id>.json
 `apply` validates full source-tree hashes and target-entry snapshots from the reviewed plan. It never
 rediscovers sources. A stale plan exits `3` without starting the apply.
 
+Run `verify` as part of the approved interaction. Do not require a second
+operator request to verify the outcome.
+
 Use `--target cursor`, `--target claude-code`, or `--target codex` for project roots. Append
 `@global` for the corresponding home root. Use `--target-root NAME=PATH` for an unregistered host.
 
@@ -59,7 +113,8 @@ contract is documented in [`docs/integration-contract.md`](docs/integration-cont
 ### Maintain existing install roots
 
 Use the primitive cycles when the request is specifically about metadata, duplicate identities,
-platform variants, traces, or an existing source map.
+platform variants, traces, or an existing source map. These are implementation
+tools behind the chat interaction, not prerequisites the operator must learn.
 
 | Cycle | Plan command | Apply behavior |
 | --- | --- | --- |
@@ -140,6 +195,16 @@ skills-audit ledger-summary --run-id <run-id>
 
 Keep route traces as `trace` resources and plan/receipt files as `artifact` resources. Do not copy
 their payloads into the ledger.
+
+For the operator-facing response, summarize evidence in this order:
+
+1. outcome;
+2. changed, unchanged, and unresolved counts;
+3. safety-relevant archives or skips;
+4. receipt and verification locations;
+5. the next action only when one remains.
+
+Do not make raw ledger or receipt payloads the primary explanation.
 
 ## Isolation and safety
 

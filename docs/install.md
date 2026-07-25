@@ -25,6 +25,32 @@ skills-audit --version
 
 Use `python -m pip install -e .` only when developing skills-auditor itself.
 
+## Register the agent skill
+
+Installing the CLI alone is enough for direct terminal use. The chat workflow also requires the
+repository's root [`SKILL.md`](../SKILL.md) to be visible in the host's skill directory.
+
+Keep the repository checkout intact and link the whole directory as one skill. For example, to
+register it globally in Codex:
+
+```bash
+mkdir -p ~/.codex/skills
+ln -s /absolute/path/to/skills-auditor ~/.codex/skills/skills-auditor
+```
+
+Choose the root that matches the host and desired scope:
+
+| Host | Project scope | Global scope |
+| --- | --- | --- |
+| Cursor | `.cursor/skills` | `~/.cursor/skills` |
+| Claude Code | `.claude/skills` | `~/.claude/skills` |
+| Codex | `.codex/skills` | `~/.codex/skills` |
+
+The destination `skills-auditor` entry must not already exist. Inspect an existing entry before
+replacing or relinking it. Once registered, start a new chat session if the host only discovers
+skills at session startup, then invoke `/skills-auditor` or ask for the equivalent workflow in
+natural language.
+
 ## No-install entry
 
 From a repository checkout:
