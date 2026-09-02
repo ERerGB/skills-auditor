@@ -74,6 +74,14 @@ class TestIntegrationCore(IntegrationFixture):
             verification = verify_receipt(receipt)
             self.assertEqual(verification["schema_version"], VERIFICATION_SCHEMA)
             self.assertEqual(verification["status"], "passed")
+            self.assertEqual(
+                verification["approval"],
+                {
+                    "state": "valid",
+                    "requires_reapproval": False,
+                    "reason_codes": [],
+                },
+            )
 
             second = build_integration_plan(self.spec(project, source, target))
             self.assertEqual(second["summary"]["changes"], 0)
@@ -119,6 +127,14 @@ class TestIntegrationCore(IntegrationFixture):
             payload.write_text("print('v3')\n", encoding="utf-8")
             verification = verify_receipt(receipt)
             self.assertEqual(verification["status"], "failed")
+            self.assertEqual(
+                verification["approval"],
+                {
+                    "state": "invalidated",
+                    "requires_reapproval": True,
+                    "reason_codes": ["source_tree"],
+                },
+            )
             self.assertIn(
                 "source_tree",
                 {check["code"] for check in verification["checks"] if not check["ok"]},
@@ -430,7 +446,9 @@ class TestIntegrationCli(IntegrationFixture):
                 "verify", str(receipt_path), "--format", "json"
             )
             self.assertEqual(code, 0, stderr)
-            self.assertEqual(json.loads(stdout)["status"], "passed")
+            verification_output = json.loads(stdout)
+            self.assertEqual(verification_output["status"], "passed")
+            self.assertEqual(verification_output["approval"]["state"], "valid")
 
     def test_json_error_has_stable_schema_and_exit_code(self) -> None:
         code, stdout, stderr = self.run_cli("integrate", "--format", "json")
@@ -501,3 +519,10 @@ class TestIntegrationCli(IntegrationFixture):
             for name, document in documents.items():
                 with self.subTest(document=name):
                     validate(instance=document, schema=schemas[name])
+
+            historical_verification = dict(verification)
+            historical_verification.pop("approval")
+            validate(
+                instance=historical_verification,
+                schema=schemas["integration-verification-v1.schema.json"],
+            )

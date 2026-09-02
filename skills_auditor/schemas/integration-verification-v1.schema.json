@@ -21,6 +21,37 @@
         }
       }
     },
+    "approval": {
+      "type": "object",
+      "required": ["state", "requires_reapproval", "reason_codes"],
+      "properties": {
+        "state": {"enum": ["valid", "invalidated"]},
+        "requires_reapproval": {"type": "boolean"},
+        "reason_codes": {
+          "type": "array",
+          "items": {"enum": ["receipt_not_completed", "target_link", "source_tree"]},
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"state": {"const": "valid"}}},
+          "then": {
+            "properties": {
+              "requires_reapproval": {"const": false},
+              "reason_codes": {"maxItems": 0}
+            }
+          },
+          "else": {
+            "properties": {
+              "requires_reapproval": {"const": true},
+              "reason_codes": {"minItems": 1}
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
     "summary": {
       "type": "object",
       "required": ["checks", "passed", "failed"],

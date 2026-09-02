@@ -152,6 +152,14 @@ class TestInstalledCliLifecycle(InstalledCliFixture):
             self.assertEqual(verification["schema_version"], "skills-auditor-verification/v1")
             self.assertEqual(verification["status"], "passed")
             self.assertTrue(all(check["ok"] for check in verification["checks"]))
+            self.assertEqual(
+                verification["approval"],
+                {
+                    "state": "valid",
+                    "requires_reapproval": False,
+                    "reason_codes": [],
+                },
+            )
 
             second_plan = self.json_cli(
                 project,
@@ -246,6 +254,14 @@ class TestInstalledCliLifecycle(InstalledCliFixture):
                 expected_exit=3,
             )
             self.assertEqual(verification["status"], "failed")
+            self.assertEqual(
+                verification["approval"],
+                {
+                    "state": "invalidated",
+                    "requires_reapproval": True,
+                    "reason_codes": ["source_tree"],
+                },
+            )
             self.assertIn(
                 "source_tree",
                 {check["code"] for check in verification["checks"] if not check["ok"]},

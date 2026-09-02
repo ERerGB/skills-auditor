@@ -84,12 +84,13 @@ no-install entry point.
 
 - **Plan first:** generic chat requests inspect and propose; they do not mutate skill definitions or
   install roots.
-- **Explicit approval:** apply occurs only after direct operator wording or an explicit apply
-  configuration.
+- **Version-bound approval:** apply occurs only after direct operator wording or an explicit apply
+  configuration. That approval covers the reviewed source hashes and target state, not every future
+  version; verification drift invalidates it and requires a new plan and explicit re-approval.
 - **No inferred deletion:** archive and keep are supported defaults; deletion always requires
   separate, explicit wording.
-- **Check the close:** integration receipts verify installed links and source payloads; maintenance
-  runs finish with another audit.
+- **Check the close:** integration receipts verify installed links and source payloads, reporting
+  whether the version-bound approval remains valid; maintenance runs finish with another audit.
 - **Preserve evidence:** failed applies retain completed actions and error details when the
   filesystem permits it.
 
@@ -98,7 +99,9 @@ paths cover other host layouts.
 
 The boundary is filesystem governance. `skills-auditor` can establish metadata conformance,
 definition provenance, payload integrity, and lifecycle evidence. It does not execute a skill or
-promise identical behavior across models, credentials, tools, or hosts.
+prove semantic safety, and it cannot prevent a live symlink change from being consumed between
+verification runs. It does not promise identical behavior across models, credentials, tools, or
+hosts.
 
 ## Documentation
 
