@@ -44,6 +44,19 @@ class InstalledCliFixture(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def link_snapshot(self, entry: Path) -> tuple:
+        stat = entry.lstat()
+        return (stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, os.readlink(entry))
+
+    def source_snapshot(self, canonical: Path) -> dict:
+        return {
+            str(path.relative_to(canonical)): (
+                path.read_bytes(), path.stat().st_mode, path.stat().st_mtime_ns
+            )
+            for path in canonical.rglob("*")
+            if path.is_file()
+        }
+
     def run_cli(
         self,
         project: Path,
@@ -82,6 +95,160 @@ class InstalledCliFixture(unittest.TestCase):
 
 
 class TestInstalledCliLifecycle(InstalledCliFixture):
+    def test_source_drift_renews_approval_only_after_explicit_noop_apply(self) -> None:
+        with tempfile.TemporaryDirectory() as base:
+            project = Path(base)
+            canonical = self.write_skill(project / ".agents" / "skills", "alpha")
+            payload = canonical / "payload.txt"
+            payload.write_text("H1\n", encoding="utf-8")
+            self.write_config(project, ["codex"])
+            original_plan_path = project / "original-plan.json"
+            self.json_cli(
+                project, "integrate", "--plan-out", str(original_plan_path), "--format", "json"
+            )
+            original = self.json_cli(project, "apply", str(original_plan_path), "--format", "json")
+            original_path = Path(original["receipt_path"])
+            original_bytes = original_path.read_bytes()
+            verification = self.json_cli(project, "verify", str(original_path), "--format", "json")
+            self.assertEqual(verification["approval"]["state"], "valid")
+
+            payload.write_text("H2\n", encoding="utf-8")
+            invalidated = self.json_cli(
+                project, "verify", str(original_path), "--format", "json", expected_exit=3
+            )
+            self.assertEqual(
+                invalidated["approval"],
+                {
+                    "state": "invalidated",
+                    "requires_reapproval": True,
+                    "reason_codes": ["source_tree"],
+                },
+            )
+            human = self.run_cli(project, "verify", str(original_path))
+            self.assertEqual(human.returncode, 3, human.stderr or human.stdout)
+            self.assertEqual(human.stderr, "")
+            for guidance in (
+                "approval: invalidated | re-approval required: yes",
+                "skills-audit integrate",
+                "Review the emitted plan",
+                "Explicitly re-approve",
+                "skills-audit apply",
+            ):
+                self.assertIn(guidance, human.stdout)
+
+            entry = project / ".codex" / "skills" / "alpha"
+            link_before = self.link_snapshot(entry)
+            source_before = self.source_snapshot(canonical)
+            receipts_before = {
+                path.name: path.read_bytes() for path in original_path.parent.glob("*.json")
+            }
+            renewal_plan_path = project / "renewal-plan.json"
+            renewal_plan = self.json_cli(
+                project, "integrate", "--plan-out", str(renewal_plan_path), "--format", "json"
+            )
+            self.assertEqual(renewal_plan["summary"]["changes"], 0)
+            self.assertEqual(renewal_plan["summary"]["actions"], 1)
+            self.assertEqual(renewal_plan["targets"][0]["actions"][0]["action"], "noop")
+            self.assertEqual(
+                {path.name: path.read_bytes() for path in original_path.parent.glob("*.json")},
+                receipts_before,
+            )
+            self.assertEqual(self.link_snapshot(entry), link_before)
+            self.assertEqual(self.source_snapshot(canonical), source_before)
+            still_invalidated = self.json_cli(
+                project, "verify", str(original_path), "--format", "json", expected_exit=3
+            )
+            self.assertEqual(still_invalidated["approval"], invalidated["approval"])
+
+            renewed = self.json_cli(project, "apply", str(renewal_plan_path), "--format", "json")
+            renewed_path = Path(renewed["receipt_path"])
+            self.assertNotEqual(renewed_path, original_path)
+            self.assertNotEqual(renewed["receipt_id"], original["receipt_id"])
+            self.assertEqual(renewed["plan_id"], renewal_plan["plan_id"])
+            self.assertEqual(renewed["results"][0]["action"], "noop")
+            self.assertEqual(
+                renewed["results"][0]["expected_tree_sha256"],
+                renewal_plan["source_skills"][0]["tree_sha256"],
+            )
+            self.assertNotEqual(
+                renewed["results"][0]["expected_tree_sha256"],
+                original["results"][0]["expected_tree_sha256"],
+            )
+            verified = self.json_cli(project, "verify", str(renewed_path), "--format", "json")
+            self.assertEqual(
+                verified["approval"],
+                {"state": "valid", "requires_reapproval": False, "reason_codes": []},
+            )
+            self.assertEqual(self.link_snapshot(entry), link_before)
+            self.assertEqual(self.source_snapshot(canonical), source_before)
+            self.assertEqual(original_path.read_bytes(), original_bytes)
+            old_verified = self.json_cli(
+                project, "verify", str(original_path), "--format", "json", expected_exit=3
+            )
+            self.assertEqual(old_verified["approval"], invalidated["approval"])
+
+    def test_stale_noop_plan_rejects_source_change_without_replacing_link_or_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as base:
+            project = Path(base)
+            canonical = self.write_skill(project / ".agents" / "skills", "alpha")
+            payload = canonical / "payload.txt"
+            payload.write_text("H1\n", encoding="utf-8")
+            self.write_config(project, ["codex"])
+            original_plan_path = project / "original-plan.json"
+            self.json_cli(
+                project, "integrate", "--plan-out", str(original_plan_path), "--format", "json"
+            )
+            original = self.json_cli(project, "apply", str(original_plan_path), "--format", "json")
+            original_path = Path(original["receipt_path"])
+            original_bytes = original_path.read_bytes()
+            receipts_before = {
+                path.name: path.read_bytes() for path in original_path.parent.glob("*.json")
+            }
+            payload.write_text("H2\n", encoding="utf-8")
+            renewal_plan_path = project / "renewal-plan.json"
+            renewal_plan = self.json_cli(
+                project, "integrate", "--plan-out", str(renewal_plan_path), "--format", "json"
+            )
+            self.assertEqual(renewal_plan["targets"][0]["actions"][0]["action"], "noop")
+            payload.write_text("H3\n", encoding="utf-8")
+            entry = project / ".codex" / "skills" / "alpha"
+            link_before = self.link_snapshot(entry)
+            source_before = self.source_snapshot(canonical)
+            rejected_receipt_path = project / "rejected-receipt.json"
+
+            error = self.json_cli(
+                project,
+                "apply",
+                str(renewal_plan_path),
+                "--receipt-out",
+                str(rejected_receipt_path),
+                "--format",
+                "json",
+                expected_exit=3,
+            )
+            self.assertEqual(error["schema_version"], "skills-auditor-error/v1")
+            self.assertEqual(error["error"]["code"], "stale_plan")
+            self.assertIn("source_changed", {detail["code"] for detail in error["error"]["details"]})
+            self.assertFalse(rejected_receipt_path.exists())
+            self.assertEqual(
+                {path.name: path.read_bytes() for path in original_path.parent.glob("*.json")},
+                receipts_before,
+            )
+            self.assertEqual(self.link_snapshot(entry), link_before)
+            self.assertEqual(self.source_snapshot(canonical), source_before)
+            self.assertEqual(original_path.read_bytes(), original_bytes)
+            old_verified = self.json_cli(
+                project, "verify", str(original_path), "--format", "json", expected_exit=3
+            )
+            self.assertEqual(
+                old_verified["approval"],
+                {
+                    "state": "invalidated",
+                    "requires_reapproval": True,
+                    "reason_codes": ["source_tree"],
+                },
+            )
+
     def test_plan_apply_verify_and_noop_across_all_builtin_host_roots(self) -> None:
         with tempfile.TemporaryDirectory() as base:
             project = Path(base) / "project"
