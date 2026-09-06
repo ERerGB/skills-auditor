@@ -21,6 +21,37 @@
         }
       }
     },
+    "approval": {
+      "type": "object",
+      "required": ["state", "requires_reapproval", "reason_codes"],
+      "properties": {
+        "state": {"enum": ["valid", "invalidated"]},
+        "requires_reapproval": {"type": "boolean"},
+        "reason_codes": {
+          "type": "array",
+          "items": {"enum": ["receipt_not_completed", "target_link", "source_tree"]},
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"state": {"const": "valid"}}},
+          "then": {
+            "properties": {
+              "requires_reapproval": {"const": false},
+              "reason_codes": {"maxItems": 0}
+            }
+          },
+          "else": {
+            "properties": {
+              "requires_reapproval": {"const": true},
+              "reason_codes": {"minItems": 1}
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
     "summary": {
       "type": "object",
       "required": ["checks", "passed", "failed"],
@@ -32,5 +63,152 @@
       "additionalProperties": false
     }
   },
+  "allOf": [
+    {
+      "if": {"required": ["approval"]},
+      "then": {
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "checks": {
+                  "contains": {
+                    "type": "object",
+                    "required": ["ok"],
+                    "properties": {"ok": {"const": false}}
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "status": {"const": "failed"},
+                "approval": {
+                  "properties": {
+                    "state": {"const": "invalidated"},
+                    "requires_reapproval": {"const": true}
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "status": {"const": "passed"},
+                "approval": {
+                  "properties": {
+                    "state": {"const": "valid"},
+                    "requires_reapproval": {"const": false},
+                    "reason_codes": {"maxItems": 0}
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "checks": {
+                  "contains": {
+                    "type": "object",
+                    "required": ["code", "ok"],
+                    "properties": {
+                      "code": {"const": "receipt_not_completed"},
+                      "ok": {"const": false}
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "approval": {
+                  "properties": {
+                    "reason_codes": {"contains": {"const": "receipt_not_completed"}}
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "approval": {
+                  "properties": {
+                    "reason_codes": {"not": {"contains": {"const": "receipt_not_completed"}}}
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "checks": {
+                  "contains": {
+                    "type": "object",
+                    "required": ["code", "ok"],
+                    "properties": {
+                      "code": {"const": "target_link"},
+                      "ok": {"const": false}
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "approval": {
+                  "properties": {
+                    "reason_codes": {"contains": {"const": "target_link"}}
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "approval": {
+                  "properties": {
+                    "reason_codes": {"not": {"contains": {"const": "target_link"}}}
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "checks": {
+                  "contains": {
+                    "type": "object",
+                    "required": ["code", "ok"],
+                    "properties": {
+                      "code": {"const": "source_tree"},
+                      "ok": {"const": false}
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "approval": {
+                  "properties": {
+                    "reason_codes": {"contains": {"const": "source_tree"}}
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "approval": {
+                  "properties": {
+                    "reason_codes": {"not": {"contains": {"const": "source_tree"}}}
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
   "additionalProperties": false
 }

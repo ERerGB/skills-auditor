@@ -2860,7 +2860,12 @@ def main(prog: Optional[str] = None) -> int:
             print(json.dumps(verification, indent=2, ensure_ascii=False))
         else:
             summary = verification["summary"]
+            approval = verification["approval"]
             print(f"status: {verification['status']}")
+            print(
+                f"approval: {approval['state']} | re-approval required: "
+                f"{'yes' if approval['requires_reapproval'] else 'no'}"
+            )
             print(
                 f"checks: {summary['checks']} | passed: {summary['passed']} | "
                 f"failed: {summary['failed']}"
@@ -2868,6 +2873,12 @@ def main(prog: Optional[str] = None) -> int:
             for check in verification["checks"]:
                 if not check.get("ok"):
                     print(f"  FAIL {check['code']}: {json.dumps(check, ensure_ascii=False)}")
+            if approval["requires_reapproval"]:
+                print(f"approval reasons: {', '.join(approval['reason_codes'])}")
+                print("Next steps:")
+                print("  1. Run skills-audit integrate with the same source and target options.")
+                print("  2. Review the emitted plan.")
+                print("  3. Explicitly re-approve and run skills-audit apply <new-plan.json>.")
         return 0 if verification["status"] == "passed" else 3
 
     if args.command == "audit":
