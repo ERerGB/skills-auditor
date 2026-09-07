@@ -89,6 +89,13 @@ prompt bodies, environment dumps or arbitrary referenced file contents. User-aut
 local paths can still contain private information; inspect exports before sharing. Actor/tool
 labels are local attribution, not authenticated identity, and checksums are not signatures.
 
+Optional Skill Trace capture is off by default and requires both explicit enablement and review
+of the plugin's hook definitions in Codex. Its controls affect only this plugin's capture;
+disabling it preserves existing local logs. The adapter stores paths and compact task/tool
+metadata, without raw prompts or full tool inputs and outputs. See the
+[capture boundary](skill-trace.md#intent-and-current-effects) and
+[plugin trust setup](install.md#review-and-trust-this-plugins-hooks).
+
 ## Dependencies and license
 
 The runtime uses the Python standard library. Build tooling is declared in

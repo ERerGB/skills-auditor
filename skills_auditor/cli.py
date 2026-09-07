@@ -2457,7 +2457,7 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     )
     p_record_trigger.add_argument(
         "--log-dir",
-        default=".skills-auditor-local",
+        default=os.environ.get("SKILLS_AUDITOR_LOG_DIR", ".skills-auditor-local"),
         help="Local log root (default: .skills-auditor-local).",
     )
     p_record_trigger.add_argument("--source", default="manual", help="Producer name.")
@@ -2480,6 +2480,12 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     p_record_trigger.add_argument("--trace-path", default="", help="Referenced state-machine trace path.")
     p_record_trigger.add_argument("--notes", default="", help="Short operator note.")
 
+    p_skill_trace = sub.add_parser("skill-trace", help="Control and check only the optional Skill Trace plugin")
+    p_skill_trace.add_argument("action", choices=("enable", "disable", "status", "check"))
+    p_skill_trace.add_argument("--log-dir", help="Sensor log root; defaults to SKILLS_AUDITOR_LOG_DIR or .skills-auditor-local")
+    p_skill_trace.add_argument("--session-id", help="Task to check; defaults to the current Codex task")
+    p_skill_trace.add_argument("--format", choices=("human", "json"), default="human")
+
     p_record_sensor = sub.add_parser(
         "record-sensor-event",
         help="Normalize one agent hook/transcript JSON payload into the local sensor log",
@@ -2496,7 +2502,7 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     )
     p_record_sensor.add_argument(
         "--log-dir",
-        default=".skills-auditor-local",
+        default=os.environ.get("SKILLS_AUDITOR_LOG_DIR", ".skills-auditor-local"),
         help="Local log root (default: .skills-auditor-local).",
     )
     p_record_sensor.add_argument(
@@ -2521,7 +2527,7 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     )
     p_audit_trigger_logs.add_argument(
         "--log-dir",
-        default=".skills-auditor-local",
+        default=os.environ.get("SKILLS_AUDITOR_LOG_DIR", ".skills-auditor-local"),
         help="Local log root (default: .skills-auditor-local).",
     )
     p_audit_trigger_logs.add_argument(
@@ -2542,7 +2548,7 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     )
     p_audit_sensor_logs.add_argument(
         "--log-dir",
-        default=".skills-auditor-local",
+        default=os.environ.get("SKILLS_AUDITOR_LOG_DIR", ".skills-auditor-local"),
         help="Local log root (default: .skills-auditor-local).",
     )
     p_audit_sensor_logs.add_argument(
@@ -2562,7 +2568,7 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     )
     p_aggregate_sensor_claims.add_argument(
         "--log-dir",
-        default=".skills-auditor-local",
+        default=os.environ.get("SKILLS_AUDITOR_LOG_DIR", ".skills-auditor-local"),
         help="Local log root (default: .skills-auditor-local).",
     )
     p_aggregate_sensor_claims.add_argument(
@@ -2577,7 +2583,7 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     )
     p_log_stats.add_argument(
         "--log-dir",
-        default=".skills-auditor-local",
+        default=os.environ.get("SKILLS_AUDITOR_LOG_DIR", ".skills-auditor-local"),
         help="Local trigger log root (default: .skills-auditor-local).",
     )
     p_log_stats.add_argument(
@@ -2773,6 +2779,13 @@ def _main(prog: Optional[str] = None) -> int:
     if args.command in {"metadata-repair", "sync", "sync-discover", "dedup", "route"} and args.apply:
         from skills_auditor.lifecycle.guards import assert_legacy_mutation_allowed
         assert_legacy_mutation_allowed(resolve_skills_dirs(args.skills_dirs))
+
+    from skills_auditor.skill_trace import preflight_warning, run_control
+
+    if args.command == "skill-trace":
+        return run_control(args)
+    if args.command not in {"record-sensor-event", "record-trigger-log"}:
+        preflight_warning(getattr(args, "log_dir", None))
 
     if args.command == "integrate":
         from skills_auditor.integration import (

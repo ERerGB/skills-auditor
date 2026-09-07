@@ -5,7 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 scripts/sensor_hook.py --provider codex"
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/sensor_hook.py\" --provider codex",
+            "timeout": 5
           }
         ]
       }
@@ -16,7 +17,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 scripts/sensor_hook.py --provider codex"
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/sensor_hook.py\" --provider codex",
+            "timeout": 5
           }
         ]
       }
@@ -27,7 +29,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 scripts/sensor_hook.py --provider codex"
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/sensor_hook.py\" --provider codex",
+            "timeout": 5
           }
         ]
       }
@@ -37,7 +40,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 scripts/sensor_hook.py --provider codex"
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/sensor_hook.py\" --provider codex",
+            "timeout": 5
           }
         ]
       }

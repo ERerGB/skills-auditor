@@ -111,11 +111,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    args = parse_args()
-    _add_repo_to_path()
     try:
+        args = parse_args()
+        _add_repo_to_path()
         from skills_auditor.observability import sensor_event_from_payload, write_sensor_event
+        from skills_auditor.skill_trace import log_root, read_settings
 
+        if not read_settings()["enabled"]:
+            return 0
         payload = _read_payload(args.input_file)
         event = sensor_event_from_payload(
             payload,
@@ -124,12 +127,15 @@ def main() -> int:
             resolve_path=args.resolve_path,
             hash_path=args.hash_path,
         )
+        event.metadata["skill_trace"] = 1
+        event.metadata["hook_event_name"] = payload.get("hook_event_name", "")
         if not args.dry_run:
-            write_sensor_event(event, Path(args.log_dir).expanduser())
+            cwd = Path(event.cwd).expanduser() if event.cwd else Path.cwd()
+            write_sensor_event(event, log_root(cwd, args.log_dir))
         if args.dry_run or args.print_event:
             print(json.dumps(event.to_dict(), ensure_ascii=False, sort_keys=True))
         return 0
-    except Exception as exc:
+    except (Exception, SystemExit) as exc:
         print(f"skill-trace sensor hook failed: {exc}", file=sys.stderr)
         return 0
 

@@ -87,6 +87,28 @@ skills-audit audit --skills-dir "$HOME/.cursor/skills"
 `dirty_count` is repository-wide. `skill_dirty_count` is scoped to the resolved skill directory,
 so unrelated monorepo changes can leave the skill itself clean.
 
+## Skill Trace captures no events
+
+Run `skills-audit skill-trace status` inside the affected Codex task to see the effective capture
+setting, its source, and health. Use `--format json` for the task id, log root, and observed handlers.
+
+- `disabled`: capture is intentionally off. If you want it, follow the
+  [enablement and trust steps](install.md#optional-skill-trace-plugin). An environment override
+  can take precedence over the saved preference; `status` identifies that source.
+- `unverified` or `stale`: inspect **this plugin's** four handlers in Codex CLI `/hooks`, using the
+  same user and `CODEX_HOME` as the desktop app. Check that the updated plugin is installed and its
+  current definitions are trusted and enabled. Then check the Python runner and reported log root
+  using the [installation guide](install.md#install-the-plugin-and-its-python-core).
+- `error`: inspect the settings or log path named in the message for invalid content or access
+  failures. The check does not repair these files or change trust automatically.
+
+After installation or a hook update, start a fresh task, perform a real local file read, then run
+`skills-audit skill-trace check` in a separate tool call so the earlier post-tool hook has finished.
+From an external terminal, run in the task directory and pass `--session-id <task-id>`.
+Old logs, session-start evidence alone, and a manual script smoke test cannot establish health.
+Ordinary auditing remains available while you investigate. See the
+[health-state contract](skill-trace.md#independent-preflight) for evidence limits and exit codes.
+
 ## Exit codes
 
 For `integrate`, `apply`, and `verify`, `0` means command success, `2` means invalid input, and `3`

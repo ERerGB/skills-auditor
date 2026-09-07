@@ -6,6 +6,12 @@ authorization.
 
 ## Agent entry behavior
 
+Every invocation of the root skill, a maintenance sub-skill, or the Skill Trace skill starts with
+the [optional capture preflight](../SKILL.md#before-every-invocation-optional-skill-trace-preflight).
+Disabled capture continues quietly; enabled capture with missing or stale evidence is reported
+without blocking ordinary auditing. See [Skill Trace controls and health states](skill-trace.md)
+for the CLI contract. The preflight never enables capture or grants hook trust.
+
 A generic `/skills-auditor` invocation chooses integration or maintenance from the operator's
 intent. A broad maintenance audit uses the following plan-first pipeline:
 
@@ -82,6 +88,9 @@ Layered maintenance instructions live under [`skills/`](../skills/README.md):
 - `traces`: validate route state transitions.
 - `sync`: maintain legacy map/discovery workflows.
 - `close`: confirm the end state.
+
+The separate [Skill Trace plugin](skill-trace.md) captures host runtime events. Its capture health
+check also runs before a directly invoked maintenance sub-skill.
 
 ## CLI entries
 

@@ -73,6 +73,29 @@ When the operator invokes `/skills-auditor` without a narrower request:
 Disclose those side effects before running them. Neither changes a skill
 definition or install root.
 
+## Before every invocation: optional Skill Trace preflight
+
+After loading any `SKILLS_AUDITOR_CONFIG`, and before the requested workflow, run:
+
+```bash
+skills-audit skill-trace check
+```
+
+This is an agent entry pre-hook, independent of Codex dispatching plugin hooks. It also runs
+when the plugin hooks are untrusted or absent. The CLI automatically performs the same read-only
+check before ordinary commands inside Codex; directly invoked sub-skills follow this contract too.
+
+- `disabled`: continue quietly. Capture is optional and off by default.
+- `healthy`: recent plugin tool-before and tool-after events exist for this task and directory.
+- `unverified`, `stale`, or `error`: report the capture gap once, then continue the requested audit.
+  Do not treat missing evidence as no skill use or as proof that trust is missing.
+
+Never enable capture, grant hook trust, or change Codex-wide hook settings as part of preflight.
+Never use a synthetic event or `--dry-run` as evidence that the host dispatches hooks.
+Use `skills-audit skill-trace enable` or `disable` only when the operator requests that preference.
+The switch affects only Skill Trace capture, preserving existing logs and ordinary auditing.
+See [plugin installation and trust](docs/install.md#optional-skill-trace-plugin).
+
 ## Choose one path
 
 ### Integrate canonical sources into hosts

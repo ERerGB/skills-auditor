@@ -7,6 +7,13 @@ description: >
 
 # Skills Auditor — Discover (cycle 1)
 
+## Before every invocation
+
+Run `skills-audit skill-trace check` before this cycle, including direct invocation.
+If capture is disabled, continue quietly. If enabled but unverified, stale, or errored,
+report the capture gap once and continue the cycle; do not auto-enable or trust hooks.
+See the [parent preflight contract](../../SKILL.md#before-every-invocation-optional-skill-trace-preflight).
+
 ## When to use
 
 - Scoped request: “audit only”, “drift check”, “discovery profile”, first leg of pipeline.

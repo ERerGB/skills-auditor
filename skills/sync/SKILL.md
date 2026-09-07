@@ -7,6 +7,13 @@ description: >
 
 # Skills Auditor — Sync (cycle 5)
 
+## Before every invocation
+
+Run `skills-audit skill-trace check` before this cycle, including direct invocation.
+If capture is disabled, continue quietly. If enabled but unverified, stale, or errored,
+report the capture gap once and continue the cycle; do not auto-enable or trust hooks.
+See the [parent preflight contract](../../SKILL.md#before-every-invocation-optional-skill-trace-preflight).
+
 ## When to use
 
 - Operator has a maintained mapping file (see `config/sources.example.json`) or wants discovery-driven replication from source roots.

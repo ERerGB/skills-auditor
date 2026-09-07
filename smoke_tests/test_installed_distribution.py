@@ -77,6 +77,24 @@ class TestInstalledDistributionSmoke(unittest.TestCase):
             f"artifact smoke imported the source checkout: {installed_path}",
         )
 
+    def test_skill_trace_controls_work_from_installed_wheel(self) -> None:
+        with tempfile.TemporaryDirectory() as base:
+            settings = Path(base) / "plugin-settings.json"
+            env = os.environ.copy()
+            env.pop("SKILLS_AUDITOR_SKILL_TRACE", None)
+            env["SKILLS_AUDITOR_SKILL_TRACE_CONFIG"] = str(settings)
+            for action, enabled in (("status", False), ("enable", True), ("disable", False)):
+                result = subprocess.run(
+                    [str(CLI), "skill-trace", action, "--format", "json"],
+                    cwd=base, env=env, capture_output=True, text=True, timeout=30, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                payload = json.loads(result.stdout)
+                self.assertEqual(payload["enabled"], enabled)
+                if not enabled:
+                    self.assertEqual(payload["status"], "disabled")
+            self.assertEqual(sorted(path.name for path in Path(base).iterdir()), [settings.name])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
