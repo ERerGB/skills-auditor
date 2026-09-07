@@ -70,6 +70,24 @@ class TestIntegrationReapproval(unittest.TestCase):
             {"state": "invalidated", "requires_reapproval": True, "reason_codes": ["source_tree"]},
         )
 
+    def test_v1_verification_matches_restored_version_without_persisting_revocation(self) -> None:
+        original_payload = self.payload.read_bytes()
+        link_before = self.link_snapshot()
+        receipts_before = self.receipt_snapshot()
+        self.assertEqual(verify_receipt(self.old_receipt)["approval"]["state"], "valid")
+
+        self.payload.write_text("H2\n", encoding="utf-8")
+        self.assert_old_approval_invalidated()
+        self.payload.write_bytes(original_payload)
+
+        self.assertEqual(
+            verify_receipt(self.old_receipt)["approval"],
+            {"state": "valid", "requires_reapproval": False, "reason_codes": []},
+        )
+        self.assertEqual(self.link_snapshot(), link_before)
+        self.assertEqual(self.receipt_snapshot(), receipts_before)
+        self.assertEqual(self.old_receipt_path.read_bytes(), self.old_receipt_bytes)
+
     def test_noop_plan_requires_explicit_apply_to_renew_changed_source_approval(self) -> None:
         self.assertEqual(verify_receipt(self.old_receipt)["approval"]["state"], "valid")
         self.payload.write_text("H2\n", encoding="utf-8")

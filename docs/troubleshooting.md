@@ -30,8 +30,10 @@ mistaken for an entry to replace. Move the canonical tree outside that namespace
 
 ## Apply reports `stale_plan`
 
-A reviewed source-tree hash or affected target entry changed. No apply was started. Generate and review
-a new plan:
+A reviewed source-tree hash, affected target entry, or reserved archive destination changed. If the
+initial preflight rejected the plan, no apply actions started. The same error can also arise during
+a later per-action check, after earlier actions completed. Preserve any failed receipt and audit
+the plan's target roots and archive paths before generating and reviewing a new plan:
 
 ```bash
 skills-audit integrate --config skills-auditor.json
@@ -41,8 +43,15 @@ Do not edit `plan_id` to bypass the check.
 
 ## Apply reports a failed receipt
 
-Some earlier actions may have completed before an I/O failure. Preserve the failed receipt, inspect
-its `results`, audit every listed target root, then generate a new plan from the current state.
+Some earlier actions may have completed before an I/O failure or a later `stale_plan` check. They
+are not automatically undone. Preserve the failed receipt and original plan, inspect `results`,
+and audit every target root and reserved archive in the plan before preparing a new plan.
+
+`results` contains only actions that completed and passed their post-operation checks. It is not a
+write-ahead journal: an empty list does not prove that no filesystem changes occurred, and an
+unlisted action may have changed its target before failing verification. Receipt-write failures
+and process interruption may leave no new receipt at all. Do not blindly retry or remove a
+concurrent user's entry; establish the actual source, link, and archive state first.
 
 ## Verify fails
 
