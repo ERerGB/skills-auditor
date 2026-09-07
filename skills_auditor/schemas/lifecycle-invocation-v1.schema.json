@@ -1,0 +1,640 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/lifecycle-invocation-v1.schema.json",
+  "title": "Managed invocation selection and explicit staleness override v1",
+  "description": "Selection is not execution or continuous enforcement. Runtime checksums and record linkage remain required.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/selection"
+    },
+    {
+      "$ref": "#/$defs/plan"
+    },
+    {
+      "$ref": "#/$defs/override"
+    },
+    {
+      "$ref": "#/$defs/grant"
+    },
+    {
+      "$ref": "#/$defs/receipt"
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^/",
+      "maxLength": 4096
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recorded",
+        "event_sequence"
+      ],
+      "properties": {
+        "recorded": {
+          "type": "boolean"
+        },
+        "event_sequence": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "recorded": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "event_sequence": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "event_sequence": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "invocation_id",
+        "installation_id",
+        "version_id",
+        "policy",
+        "decision",
+        "exit_code",
+        "snapshot_path",
+        "override",
+        "reason_codes",
+        "assessed_at",
+        "status",
+        "audit",
+        "notice"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "skills-auditor-invocation/v1"
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "installation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "version_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policy": {
+          "enum": [
+            "strict",
+            "last-known-good"
+          ]
+        },
+        "decision": {
+          "enum": [
+            "proceed",
+            "warn",
+            "block"
+          ]
+        },
+        "exit_code": {
+          "enum": [
+            0,
+            3,
+            4
+          ]
+        },
+        "snapshot_path": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "override": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "override_id",
+                "used",
+                "expires_at",
+                "reason"
+              ],
+              "properties": {
+                "override_id": {
+                  "$ref": "#/$defs/id"
+                },
+                "used": {
+                  "type": "boolean"
+                },
+                "expires_at": {
+                  "$ref": "#/$defs/time"
+                },
+                "reason": {
+                  "$ref": "#/$defs/reason"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_codes": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "assessed_at": {
+          "$ref": "#/$defs/time"
+        },
+        "status": {
+          "$ref": "lifecycle-status-v1.schema.json"
+        },
+        "audit": {
+          "$ref": "#/$defs/audit"
+        },
+        "notice": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "proceed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "exit_code": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "warn"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "exit_code": {
+                "const": 4
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "block"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "exit_code": {
+                "const": 3
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "proceed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "snapshot_path": {
+                "$ref": "#/$defs/path"
+              },
+              "version_id": {
+                "$ref": "#/$defs/hash"
+              },
+              "audit": {
+                "properties": {
+                  "recorded": {
+                    "const": true
+                  }
+                }
+              },
+              "status": {
+                "properties": {
+                  "approval": {
+                    "properties": {
+                      "state": {
+                        "const": "valid"
+                      }
+                    }
+                  },
+                  "lifecycle_state": {
+                    "const": "active"
+                  },
+                  "freshness": {
+                    "properties": {
+                      "state": {
+                        "enum": [
+                          "fresh",
+                          "stale"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "snapshot_path": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "proceed"
+              },
+              "status": {
+                "properties": {
+                  "freshness": {
+                    "properties": {
+                      "state": {
+                        "const": "stale"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "override": {
+                "type": "object",
+                "properties": {
+                  "used": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "project_root",
+        "plan_id",
+        "created_at",
+        "expires_at",
+        "ttl_seconds",
+        "reason",
+        "max_age_seconds",
+        "expected_revision",
+        "installation_id",
+        "skill_id",
+        "version_id",
+        "grant_id",
+        "target",
+        "generation",
+        "receipt_id"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "skills-auditor-invocation-override-plan/v1"
+        },
+        "project_root": {
+          "$ref": "#/$defs/path"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/hash"
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/time"
+        },
+        "ttl_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "reason": {
+          "$ref": "#/$defs/reason"
+        },
+        "max_age_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "installation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "skill_id": {
+          "$ref": "#/$defs/id"
+        },
+        "version_id": {
+          "$ref": "#/$defs/hash"
+        },
+        "grant_id": {
+          "$ref": "#/$defs/id"
+        },
+        "target": {
+          "$ref": "#/$defs/path"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "receipt_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "override": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "override_id",
+        "state",
+        "plan_id",
+        "expires_at",
+        "created_at",
+        "reason",
+        "max_age_seconds",
+        "approval_receipt_id",
+        "revocation_receipt_id",
+        "installation_id",
+        "skill_id",
+        "version_id",
+        "grant_id",
+        "target",
+        "generation",
+        "receipt_id"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "skills-auditor-invocation-override/v1"
+        },
+        "override_id": {
+          "$ref": "#/$defs/id"
+        },
+        "state": {
+          "enum": [
+            "active",
+            "revoked"
+          ]
+        },
+        "plan_id": {
+          "$ref": "#/$defs/hash"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/time"
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "reason": {
+          "$ref": "#/$defs/reason"
+        },
+        "max_age_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "approval_receipt_id": {
+          "$ref": "#/$defs/id"
+        },
+        "revocation_receipt_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "installation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "skill_id": {
+          "$ref": "#/$defs/id"
+        },
+        "version_id": {
+          "$ref": "#/$defs/hash"
+        },
+        "grant_id": {
+          "$ref": "#/$defs/id"
+        },
+        "target": {
+          "$ref": "#/$defs/path"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "receipt_id": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "if": {
+        "properties": {
+          "state": {
+            "const": "active"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "revocation_receipt_id": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "revocation_receipt_id": {
+            "$ref": "#/$defs/id"
+          }
+        }
+      }
+    },
+    "grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "override_id",
+        "plan",
+        "approved_plan_id",
+        "receipt_id",
+        "actor",
+        "tool",
+        "created_at",
+        "event_sequence"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "skills-auditor-invocation-override-grant/v1"
+        },
+        "override_id": {
+          "$ref": "#/$defs/id"
+        },
+        "plan": {
+          "$ref": "#/$defs/plan"
+        },
+        "approved_plan_id": {
+          "$ref": "#/$defs/hash"
+        },
+        "receipt_id": {
+          "$ref": "#/$defs/id"
+        },
+        "actor": {
+          "$ref": "#/$defs/label"
+        },
+        "tool": {
+          "$ref": "#/$defs/label"
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "event_sequence": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "receipt_id",
+        "override_id",
+        "plan_id",
+        "action",
+        "reason",
+        "actor",
+        "tool",
+        "created_at"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "skills-auditor-invocation-override-receipt/v1"
+        },
+        "receipt_id": {
+          "$ref": "#/$defs/id"
+        },
+        "override_id": {
+          "$ref": "#/$defs/id"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/hash"
+        },
+        "action": {
+          "enum": [
+            "approve",
+            "revoke"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/reason"
+        },
+        "actor": {
+          "$ref": "#/$defs/label"
+        },
+        "tool": {
+          "$ref": "#/$defs/label"
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        }
+      }
+    }
+  }
+}

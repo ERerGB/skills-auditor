@@ -46,10 +46,16 @@ host does not expose slash commands, ask for the same workflow in natural langua
 | Repair safe metadata problems | Proposes idempotent frontmatter repairs and waits for apply approval |
 | Resolve duplicate or variant skills | Relinks byte-identical definitions; keeps differing variants visible for routing |
 | Bring canonical skills to a workspace | Plans native links for Cursor, Claude Code, Codex, or an explicit custom root |
+| Keep approved bytes stable during edits | Managed installations expose approved snapshots while replacement candidates remain separate |
+| Recover an interrupted managed change | Records intent and step evidence for explicitly approved resume or compensation |
+| Investigate a managed warning | Links persistent incidents, bounded evidence and append-only notes to resolution proof |
 | Leave a checkable result | Produces plans, receipts, route traces, verification results, and optional run ledgers |
 
 The default posture is conservative: inspect first, preserve differing definitions, archive before
 replacement, and never infer permission to delete.
+
+Choose [managed lifecycle](docs/managed-lifecycle.md) when you need version selection, durable
+revocation and recovery. Existing live-link integrations remain compatible; migration is explicit.
 
 ## Install and start
 
@@ -94,6 +100,11 @@ no-install entry point.
 - **Preserve evidence:** failed applies retain completed actions and error details when the
   filesystem permits it.
 
+Legacy receipt verification is a current observation: restoring the reviewed bytes can make the
+same receipt valid again. Managed installations instead retain invalidation and require new
+explicit approval. Their `[OK]`, `[WARN]` and `[BLOCK]` status separates approval from evidence age;
+use-time preflight is an integration point, not an automatic badge or enforcement in every host.
+
 Built-in project and global targets are available for Cursor, Claude Code, and Codex. Explicit
 paths cover other host layouts.
 
@@ -119,6 +130,7 @@ If you are integrating, extending, or automating it:
 | Need | Read |
 | --- | --- |
 | Use versioned plans, receipts, and JSON | [Integration contract](docs/integration-contract.md) |
+| Manage versions, authorization and recovery | [Managed lifecycle](docs/managed-lifecycle.md) |
 | Automate checks in CI | [CI and automation](docs/ci.md) |
 | Inspect the agent and Python surfaces | [Skill contract and API reference](docs/skill-contract.md) |
 | Maintain or compare the project | [Releasing](docs/releasing.md) · [Alternatives](docs/alternatives.md) |

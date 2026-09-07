@@ -9,6 +9,10 @@ Integration Spec → immutable Plan → Apply → Receipt → Verify
 It exists so an operator can review the exact filesystem actions that will run. The advanced
 `sync` and `sync-discover` commands remain available as lower-level primitives.
 
+This page describes the compatible legacy live-link v1 protocol. For immutable snapshots,
+durable invalidation, stable installation identities and explicit crash recovery, see the separate
+[managed lifecycle contract](managed-lifecycle.md). Existing receipts are not silently reinterpreted.
+
 ## Core invariant
 
 `skills-audit apply` never discovers sources or rebuilds actions. It accepts one

@@ -565,6 +565,7 @@ def build_integration_plan(spec: IntegrationSpec) -> Dict[str, Any]:
 
 
 def _atomic_write_json(path: Path, value: Dict[str, Any]) -> Path:
+    _guard_managed_mutation([path])
     path = path.expanduser().resolve(strict=False)
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = tempfile.NamedTemporaryFile(
@@ -1044,6 +1045,14 @@ def _apply_exact_action(root: Path, action: Dict[str, Any]) -> None:
     )
 
 
+def _guard_managed_mutation(paths: Iterable[Path], project_root: Optional[Path] = None) -> None:
+    from skills_auditor.lifecycle.guards import ManagedBoundaryError, assert_legacy_mutation_allowed
+    try:
+        assert_legacy_mutation_allowed(paths, project_root=project_root)
+    except ManagedBoundaryError as error:
+        raise IntegrationError(error.code, str(error), exit_code=EXIT_CONTRACT, details=[error.details]) from error
+
+
 def apply_integration_plan(
     plan: Dict[str, Any],
     receipt_output: Optional[Path] = None,
@@ -1056,6 +1065,10 @@ def apply_integration_plan(
             exit_code=EXIT_CONTRACT,
             details=issues,
         )
+    mutation_paths = [Path(target["root"]) / action["name"] for target in plan["targets"] for action in target["actions"] if action["action"] in _ACTIONABLE]
+    mutation_paths.extend(Path(action["archive_path"]) for target in plan["targets"] for action in target["actions"] if action["action"] == "archive_and_link")
+    mutation_paths.append(receipt_output if receipt_output is not None else _default_receipt_path(plan, "pending").parent)
+    _guard_managed_mutation(mutation_paths, Path(plan["spec"]["project_root"]))
 
     results: List[Dict[str, Any]] = []
     try:
@@ -1164,12 +1177,12 @@ def apply_integration_plan(
         failed_path = receipt_output or _default_receipt_path(plan, failed["receipt_id"])
         try:
             failed_path = _atomic_write_json(failed_path, failed)
-        except OSError as receipt_error:
+        except (OSError, IntegrationError) as receipt_error:
             raise IntegrationError(
                 "apply_failed_without_receipt",
                 f"apply failed and receipt could not be written: {receipt_error}",
                 exit_code=EXIT_CONTRACT,
-                details=[{"apply_error": str(exc)}],
+                details=[{"apply_error": str(exc), **({"receipt_error": receipt_error.to_dict()["error"]} if isinstance(receipt_error, IntegrationError) else {})}],
             ) from exc
         if isinstance(exc, IntegrationError):
             exc.details.append({"receipt_path": str(failed_path)})

@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Completed lifecycle payload retention receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "receipt_id",
+    "transaction_id",
+    "plan_id",
+    "operation",
+    "status",
+    "completed_at",
+    "permanently_deleted",
+    "objects",
+    "expires"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "skills-auditor-lifecycle-retention-receipt/v1"
+    },
+    "receipt_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^/\\\\\\u0000-\\u001f]+$"
+    },
+    "transaction_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^/\\\\\\u0000-\\u001f]+$"
+    },
+    "plan_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "operation": {
+      "enum": [
+        "policy",
+        "expire",
+        "collect",
+        "restore",
+        "purge"
+      ]
+    },
+    "status": {
+      "const": "completed"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "permanently_deleted": {
+      "type": "boolean"
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "object_id",
+          "name",
+          "kind",
+          "snapshot_tree_sha256",
+          "quarantine_id",
+          "quarantine_path",
+          "identity",
+          "root_mode",
+          "inventory"
+        ],
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "pattern": "^(?:[a-f0-9]{64}|\\.stage-[a-f0-9]{64}-[A-Za-z0-9_-]{6,64})$"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^(?:[a-f0-9]{64}|\\.stage-[a-f0-9]{64}-[A-Za-z0-9_-]{6,64})$"
+          },
+          "kind": {
+            "enum": [
+              "snapshot",
+              "stage"
+            ]
+          },
+          "snapshot_tree_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "quarantine_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "quarantine_path": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "identity": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "integer",
+                "minimum": 0
+              }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "root_mode": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4095
+          },
+          "inventory": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "identity",
+                "mode",
+                "kind"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+                },
+                "identity": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  ],
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "mode": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4095
+                },
+                "kind": {
+                  "enum": [
+                    "file",
+                    "directory",
+                    "symlink"
+                  ]
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "link": {
+                  "type": "string"
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "kind": {
+                        "const": "file"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "sha256"
+                    ]
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "kind": {
+                        "const": "symlink"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "link"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "uniqueItems": true
+    },
+    "expires": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "receipt",
+              "incident"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^/\\\\\\u0000-\\u001f]+$"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "purge"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "permanently_deleted": {
+            "const": true
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "permanently_deleted": {
+            "const": false
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,7 +1,9 @@
 # Skill lifecycle and transaction management — executable goal
 
-Status: active design and implementation goal for Issue #19 and follow-ups
-#16–#18; not a claim of shipped capability.
+Execution contract for Issue #19 and follow-ups #16–#18. Implementation and
+final-head validation are reviewed in [PR #20](https://github.com/ERerGB/skills-auditor/pull/20),
+stacked on [PR #15](https://github.com/ERerGB/skills-auditor/pull/15).
+This document does not claim either PR has merged or a release has shipped.
 
 ## Goal prompt
 
@@ -131,3 +133,28 @@ Before completion verify exact local/remote SHA equality, each PR's open state
 and terminal Actions conclusion for that SHA, and publish reproducible evidence.
 Record which tests were added, real defects fixed, coverage fractions, remaining
 risks, related PRs and the safe review/merge handoff. Only then complete the goal.
+
+## Review and verification map
+
+The implementation is documented in the [managed lifecycle guide](managed-lifecycle.md).
+These source suites are the repeatable acceptance entry points, not a substitute
+for reviewing the final-head test and CI evidence on
+[PR #20](https://github.com/ERerGB/skills-auditor/pull/20).
+
+| Requirements | Automated review entry |
+| --- | --- |
+| L01–L03: identity, version-bound approval, governed operations | [Engine tests](../tests/test_lifecycle_engine.py), [status tests](../tests/test_lifecycle_status.py) |
+| L04–L05: snapshot publication, pointer activation and migration | [Snapshot tests](../tests/test_lifecycle_snapshots.py), [recovery tests](../tests/test_lifecycle_recovery.py) |
+| L06–L08: durable intent, process death, recovery, isolation and retries | [Repository tests](../tests/test_lifecycle_repository.py), [locking tests](../tests/test_lifecycle_locking.py), [recovery tests](../tests/test_lifecycle_recovery.py), [batch tests](../tests/test_lifecycle_batch.py) |
+| L09: freshness and fail-closed status | [Status tests](../tests/test_lifecycle_status.py), [CLI tests](../tests/test_lifecycle_cli.py) |
+| L10–L11: incidents, append-only notes and resolution proof | [Incident tests](../tests/test_lifecycle_incidents.py) |
+| L12: approved selection, bounded exception and revocation | [Invocation tests](../tests/test_lifecycle_invocation.py) |
+| L13: reference-aware collection, restore and permanent purge | [Retention tests](../tests/test_lifecycle_retention.py) |
+| L14: legacy compatibility and managed mutation guards | [Guard tests](../tests/test_lifecycle_guards.py), [legacy integration tests](../tests/test_integration.py) |
+| L15: shipped schema, documentation and installed behavior | [Core schemas](../tests/test_lifecycle_schemas.py), [batch schemas](../tests/test_lifecycle_batch_schemas.py), [guide command tests](../tests/test_lifecycle_docs.py), [CI/package inventory](../tests/test_ci_contract.py), [installed managed E2E](../e2e_tests/test_installed_managed_lifecycle.py) |
+| L16: bounded legacy partial completion and stateless reapproval | [Partial-completion tests](../tests/test_integration_partial_completion.py), [legacy reapproval tests](../tests/test_integration_reapproval.py), [installed legacy E2E](../e2e_tests/test_installed_cli_lifecycle.py) |
+
+Tests include controlled I/O failures and real subprocess termination. A process
+death test proves protocol recovery at a selected durable boundary; it does not
+simulate disk firmware, power loss, every possible scheduler interleaving or an
+adversarial privileged writer. Coverage reports must retain that distinction.

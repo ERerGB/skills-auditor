@@ -25,6 +25,8 @@ smallest safe workflow:
 | “Audit the skills in this workspace” | Inspect active roots and plan the relevant maintenance |
 | “Fix metadata, duplicates, or variants” | Run only the matching maintenance cycle |
 | “Sync this authoritative mapping” | Run mapped sync against the named map |
+| “Keep approved bytes stable while I edit” or “Manage this installed version” | Use the managed lifecycle, preserving candidate/active separation |
+| “This managed Skill is warning or an update was interrupted” | Read status and transaction evidence before proposing recovery |
 
 Do not lead with cycle names, flags, plan IDs, or schemas. First explain the
 observed state and intended result in the operator's language; show commands and
@@ -45,8 +47,13 @@ Use one visible lifecycle:
 5. **Verify** — verify automatically after apply and return the receipt,
    resulting topology, unresolved findings, and a concise outcome.
 
-If the plan contains no actions, report the zero-change plan as already aligned
-and stop. Do not manufacture apply, receipt, or verification steps.
+Stop as already aligned only when a reviewed plan has neither filesystem changes
+nor authorization, lifecycle, policy or other governance changes. Do not invent
+work for a genuinely empty plan. Empty filesystem steps alone are not sufficient:
+`revoke` persists denial without touching a link, and an override is a separately
+approved governance change. Explicit renewal and legacy `noop` reapproval can
+issue a new version-bound receipt without rebuilding a link. Preserve their
+review, exact approval, execution and evidence steps; planning never issues approval.
 
 ## Default behavior
 
@@ -99,7 +106,8 @@ skills-audit verify .skills-auditor-local/receipts/<receipt-id>.json
 ```
 
 `apply` validates full source-tree hashes and target-entry snapshots from the reviewed plan. It never
-rediscovers sources. A stale plan exits `3` without starting the apply.
+rediscovers sources. Initial stale preconditions exit `3` before effects; a later per-action
+`stale_plan` may follow earlier completed actions. Inspect the receipt and all planned targets.
 
 Run `verify` as part of the approved interaction. Do not require a second
 operator request to verify the outcome.
@@ -109,6 +117,35 @@ Use `--target cursor`, `--target claude-code`, or `--target codex` for project r
 
 An optional repository `skills-auditor.json` can replace repeated source and target flags. Its
 contract is documented in [`docs/integration-contract.md`](docs/integration-contract.md).
+
+### Manage approved versions and recover interrupted changes
+
+Read [`docs/managed-lifecycle.md`](docs/managed-lifecycle.md) for managed installation,
+candidate promotion, status/preflight, version selection, revocation or recovery.
+Use this protocol for an already managed installation; do not silently fall back
+to legacy relinking, metadata repair or direct snapshot edits after a failure.
+
+- Identify the project state owner and stable installation ID. A changed path
+  or display name is not a new identity.
+- Keep a candidate edit separate from the active approved snapshot. Do not
+  promote H2 just because H1 exists or was approved previously.
+- Save and review the managed plan before passing its exact ID to
+  `lifecycle apply --approve-plan-id`. Maintenance environment defaults do not
+  replace this per-plan approval. Revoke, renew and rollback are explicit changes.
+- Verify after apply and use fresh `lifecycle preflight` before an integrated
+  host consumes the Skill. Surface warning, unknown or blocked status and the
+  investigation/recovery entry; do not hide it behind an earlier successful receipt.
+- For interrupted work, inspect the recorded transaction first. Resume or
+  compensate only after the operator explicitly approves that recovery scope.
+  Preserve foreign entries and record unresolved partial effects.
+- Restored bytes do not clear managed invalidation or revocation. A historical
+  receipt is evidence, not current authorization; a completed change needs a new
+  reviewed inverse operation, not an automatic replay of old approval.
+
+Managed checks and investigation records stay local. Do not attach raw prompts,
+environment dumps or credentials as troubleshooting evidence. Actor/tool labels
+identify the reported local caller, not an authenticated person. A host that
+bypasses preflight is not claimed to be blocked.
 
 ### Maintain existing install roots
 
@@ -208,13 +245,18 @@ Do not make raw ledger or receipt payloads the primary explanation.
 
 ## Isolation and safety
 
-- Plan-only work can run in read-only isolation, except that route may write traces and integrate
-  writes a plan under `.skills-auditor-local/`.
+- Legacy plan-only work can run in read-only isolation, except that route may write traces and
+  integrate writes a plan under `.skills-auditor-local/`.
+- Managed planning needs access to its project state: it may initialize records, save the requested
+  plan and persist an active-state observation or denial. It never changes installation pointers
+  or candidate files and never grants approval. Candidate errors alone do not invalidate healthy
+  active bytes; `plan revoke` does not require content inspection.
 - Apply work needs write access to the exact source or target roots in scope.
 - Resolve every target before applying. Never use a home directory, repository root, or unresolved
   variable as a destructive target.
-- A failed high-level apply writes a failed receipt with completed actions and the error when the
-  filesystem permits it.
+- A failed legacy high-level apply writes a failed receipt with completed actions and the error
+  when the filesystem permits it. Managed failures instead retain their write-ahead transaction
+  and recovery reference; only completed managed transactions receive a success receipt.
 
 ## Install
 

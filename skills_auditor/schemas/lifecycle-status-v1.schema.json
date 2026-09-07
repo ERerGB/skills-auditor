@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/lifecycle-status-v1.schema.json",
+  "title": "Skills Auditor durable status v1",
+  "description": "A host-neutral point-in-time observation. Freshness is independent of approval and is recomputed when read. Extra fields are additive; this is not continuous enforcement.",
+  "type": "object",
+  "required": ["schema_version", "installation_id", "skill_id", "version_id", "receipt_id", "grant_id", "verification_id", "plan_id", "observed_at", "assessed_at", "lifecycle_state", "authorization_state", "approval", "integrity", "freshness", "severity", "reason_codes", "recommended_next_action"],
+  "properties": {
+    "schema_version": {"const": "skills-auditor-status/v1"},
+    "installation_id": {"$ref": "#/$defs/reference"},
+    "skill_id": {"$ref": "#/$defs/reference"},
+    "version_id": {"$ref": "#/$defs/reference"},
+    "receipt_id": {"$ref": "#/$defs/reference"},
+    "grant_id": {"$ref": "#/$defs/reference"},
+    "verification_id": {"$ref": "#/$defs/reference"},
+    "plan_id": {"$ref": "#/$defs/reference"},
+    "incident_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+    "observed_at": {"type": ["string", "null"], "format": "date-time"},
+    "assessed_at": {"type": "string", "format": "date-time"},
+    "lifecycle_state": {"enum": ["active", "disabled", "archived", "uninstalled", "unknown"]},
+    "authorization_state": {"enum": ["valid", "invalidated", "revoked", "unknown"]},
+    "approval": {
+      "type": "object",
+      "required": ["state", "requires_reapproval", "reason_codes"],
+      "properties": {
+        "state": {"enum": ["valid", "invalidated", "unknown"]},
+        "requires_reapproval": {"type": "boolean"},
+        "reason_codes": {"$ref": "#/$defs/reasons"}
+      },
+      "allOf": [{"if": {"properties": {"state": {"const": "valid"}}}, "then": {"properties": {"requires_reapproval": {"const": false}, "reason_codes": {"maxItems": 0}}}, "else": {"properties": {"requires_reapproval": {"const": true}}}}]
+    },
+    "integrity": {"type": "object", "required": ["valid"], "properties": {"valid": {"type": ["boolean", "null"]}}},
+    "freshness": {
+      "type": "object", "required": ["state", "age_seconds", "max_age_seconds"],
+      "properties": {
+        "state": {"enum": ["fresh", "stale", "unknown"]},
+        "age_seconds": {"type": ["number", "null"], "minimum": 0},
+        "max_age_seconds": {"type": "integer", "minimum": 1, "maximum": 86400}
+      }
+    },
+    "severity": {"enum": ["ok", "warning", "error"]},
+    "reason_codes": {"$ref": "#/$defs/reasons"},
+    "recommended_next_action": {
+      "type": "object", "required": ["command", "message"],
+      "properties": {"command": {"type": "string", "minLength": 1}, "message": {"type": "string", "minLength": 1}}
+    }
+  },
+  "$defs": {
+    "reference": {"type": ["string", "null"], "minLength": 1, "maxLength": 512},
+    "reasons": {"type": "array", "maxItems": 100, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 512}}
+  }
+}

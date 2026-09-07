@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+import runpy
 from pathlib import Path
 
 
@@ -10,6 +11,19 @@ PROJECT_ROOT = Path(__file__).parents[1]
 
 
 class TestCiContract(unittest.TestCase):
+    def test_distribution_checks_every_public_module_and_schema(self) -> None:
+        contract = runpy.run_path(str(PROJECT_ROOT / "scripts" / "check_distribution.py"))
+        package = PROJECT_ROOT / "skills_auditor"
+        required = {
+            str(path.relative_to(PROJECT_ROOT))
+            for pattern in ("*.py", "*.schema.json")
+            for path in package.rglob(pattern)
+        }
+        self.assertFalse(
+            required - contract["PACKAGE_FILES"],
+            f"Artifact content checks omit public contracts: {sorted(required - contract['PACKAGE_FILES'])}",
+        )
+
     def test_ci_keeps_independent_unit_smoke_e2e_and_distribution_jobs(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"

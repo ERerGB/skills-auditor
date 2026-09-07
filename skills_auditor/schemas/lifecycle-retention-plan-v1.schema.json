@@ -1,0 +1,372 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Reviewed lifecycle payload retention plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "operation",
+    "project_root",
+    "created_at",
+    "options",
+    "reference_fingerprint",
+    "objects",
+    "protected",
+    "policy_before",
+    "policy_after",
+    "expires",
+    "plan_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "skills-auditor-lifecycle-retention-plan/v1"
+    },
+    "operation": {
+      "enum": [
+        "policy",
+        "expire",
+        "collect",
+        "restore",
+        "purge"
+      ]
+    },
+    "project_root": {
+      "type": "string",
+      "pattern": "^/"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_ids",
+        "incident_ids",
+        "pin_version_ids",
+        "keep_recent",
+        "object_ids",
+        "stage_names",
+        "grace_seconds"
+      ],
+      "properties": {
+        "receipt_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^/\\\\\\u0000-\\u001f]+$"
+          },
+          "uniqueItems": true
+        },
+        "incident_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^/\\\\\\u0000-\\u001f]+$"
+          },
+          "uniqueItems": true
+        },
+        "pin_version_ids": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[^/\\\\\\u0000-\\u001f]+$"
+              },
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keep_recent": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^/\\\\\\u0000-\\u001f]+$"
+          },
+          "uniqueItems": true
+        },
+        "stage_names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^/\\\\\\u0000-\\u001f]+$"
+          },
+          "uniqueItems": true
+        },
+        "grace_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31536000
+        }
+      }
+    },
+    "reference_fingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "object_id",
+          "name",
+          "kind",
+          "snapshot_tree_sha256",
+          "quarantine_id",
+          "quarantine_path",
+          "identity",
+          "root_mode",
+          "inventory"
+        ],
+        "properties": {
+          "object_id": {
+            "type": "string",
+            "pattern": "^(?:[a-f0-9]{64}|\\.stage-[a-f0-9]{64}-[A-Za-z0-9_-]{6,64})$"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^(?:[a-f0-9]{64}|\\.stage-[a-f0-9]{64}-[A-Za-z0-9_-]{6,64})$"
+          },
+          "kind": {
+            "enum": [
+              "snapshot",
+              "stage"
+            ]
+          },
+          "snapshot_tree_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "quarantine_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "quarantine_path": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "identity": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "integer",
+                "minimum": 0
+              }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "root_mode": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4095
+          },
+          "inventory": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "identity",
+                "mode",
+                "kind"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+                },
+                "identity": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  ],
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "mode": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4095
+                },
+                "kind": {
+                  "enum": [
+                    "file",
+                    "directory",
+                    "symlink"
+                  ]
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "link": {
+                  "type": "string"
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "kind": {
+                        "const": "file"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "sha256"
+                    ]
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "kind": {
+                        "const": "symlink"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "link"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "uniqueItems": true
+    },
+    "protected": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "uniqueItems": true
+      }
+    },
+    "policy_before": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "keep_recent",
+        "pin_version_ids"
+      ],
+      "properties": {
+        "keep_recent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "pin_version_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^/\\\\\\u0000-\\u001f]+$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "policy_after": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "keep_recent",
+        "pin_version_ids"
+      ],
+      "properties": {
+        "keep_recent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "pin_version_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^/\\\\\\u0000-\\u001f]+$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "expires": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "receipt",
+              "incident"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^/\\\\\\u0000-\\u001f]+$"
+          }
+        }
+      }
+    },
+    "plan_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}
