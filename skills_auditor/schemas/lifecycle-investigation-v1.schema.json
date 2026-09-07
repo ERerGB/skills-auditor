@@ -16,6 +16,8 @@
     "notice"
   ],
   "properties": {
+    "project_root": {"type": "string", "pattern": "^/", "maxLength": 4096},
+    "context_verified": {"type": "boolean"},
     "schema_version": {
       "const": "skills-auditor-investigation/v1"
     },
@@ -286,7 +288,10 @@
             "after_sequence": {
               "type": "integer",
               "minimum": 1
-            }
+            },
+            "project_root": {"type": "string", "pattern": "^/", "maxLength": 4096},
+            "incident_id": {"$ref": "#/$defs/id"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50}
           },
           "additionalProperties": false
         }

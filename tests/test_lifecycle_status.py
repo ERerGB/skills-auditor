@@ -64,10 +64,10 @@ class TestLifecycleStatus(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="skills-auditor-status-")
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.repository = Repository(self.root / "state")
         self.addCleanup(self.repository.close)
-        self.manager = SimpleNamespace(repository=self.repository)
+        self.manager = SimpleNamespace(repository=self.repository, project_root=self.root, _state_safety=lambda: None)
         self.now = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
         self.installation = {
             "installation_id": "installation-one", "skill_id": "skill-one", "name": "Example",
@@ -135,7 +135,7 @@ class TestLifecycleStatus(unittest.TestCase):
         self.assertEqual(saved, old["data"])
         self.assertEqual(self.repository.get("status", "installation-one"), old)
         with Repository(self.root / "state", create=False) as restarted:
-            self.assertEqual(read_status(SimpleNamespace(repository=restarted), "installation-one", now=self.now), status)
+            self.assertEqual(read_status(SimpleNamespace(repository=restarted, project_root=self.root, _state_safety=lambda: None), "installation-one", now=self.now), status)
         schema_path = Path(__file__).resolve().parents[1] / "skills_auditor/schemas/lifecycle-status-v1.schema.json"
         schema = json.loads(schema_path.read_text())
         jsonschema.Draft202012Validator.check_schema(schema)

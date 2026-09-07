@@ -6,6 +6,8 @@
   "type": "object",
   "required": ["schema_version", "installation_id", "skill_id", "version_id", "receipt_id", "grant_id", "verification_id", "plan_id", "observed_at", "assessed_at", "lifecycle_state", "authorization_state", "approval", "integrity", "freshness", "severity", "reason_codes", "recommended_next_action"],
   "properties": {
+    "project_root": {"type": ["string", "null"], "pattern": "^/", "maxLength": 4096},
+    "context_verified": {"type": "boolean"},
     "schema_version": {"const": "skills-auditor-status/v1"},
     "installation_id": {"$ref": "#/$defs/reference"},
     "skill_id": {"$ref": "#/$defs/reference"},
@@ -42,7 +44,11 @@
     "reason_codes": {"$ref": "#/$defs/reasons"},
     "recommended_next_action": {
       "type": "object", "required": ["command", "message"],
-      "properties": {"command": {"type": "string", "minLength": 1}, "message": {"type": "string", "minLength": 1}}
+      "properties": {
+        "command": {"type": "string", "minLength": 1}, "message": {"type": "string", "minLength": 1},
+        "argv": {"type": ["array", "null"], "maxItems": 54, "items": {"type": "string", "maxLength": 4096}},
+        "required_inputs": {"type": "array", "uniqueItems": true, "items": {"enum": ["project_root", "installation_id", "source", "target"]}}
+      }
     }
   },
   "$defs": {

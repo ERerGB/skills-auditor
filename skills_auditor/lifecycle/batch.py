@@ -16,6 +16,7 @@ from .snapshots import verify_snapshot
 
 _SCHEMA = "skills-auditor-lifecycle-batch-"
 _CHILD_FIELDS = {"kind", "plan", "transaction_id", "compensates_transaction_id", "note"}
+_MAX_HISTORY = 50
 
 
 def _signal(checkpoint, name, value):
@@ -99,7 +100,7 @@ class BatchManager:
     def _history_proof(self, tx, seen=None):
         """Validate metadata completion without consulting current filesystem health."""
         seen = set() if seen is None else seen
-        if tx["batch_id"] in seen or len(seen) > 50:
+        if tx["batch_id"] in seen or len(seen) >= _MAX_HISTORY:
             raise LifecycleError("batch_corrupt", "Batch compensation history contains a cycle.")
         seen.add(tx["batch_id"])
         for child, reference in zip(tx["plan"]["children"], tx["children"]):
@@ -127,14 +128,30 @@ class BatchManager:
             if inverse["plan"]["compensates_batch_id"] != tx["batch_id"]:
                 raise LifecycleError("batch_compensation_missing", "Inverse batch refers to a different original batch.")
             if tx["state"] == "compensated":
-                if inverse["state"] != "completed" or inverse["plan"]["uncompensated"]:
+                if inverse["receipt_id"] is None or inverse["plan"]["uncompensated"]:
                     raise LifecycleError("batch_compensation_missing", "Original batch has no complete inverse proof.")
                 self._history_proof(inverse, seen)
-        if tx["state"] == "completed" and tx["plan"]["compensates_batch_id"]:
+        if tx["receipt_id"] is not None and tx["plan"]["compensates_batch_id"]:
             original = self._record(tx["plan"]["compensates_batch_id"])["data"]
             expected_state = "recovery_needed" if tx["plan"]["uncompensated"] else "compensated"
             if original["compensation_batch_id"] != tx["batch_id"] or original["state"] != expected_state:
                 raise LifecycleError("batch_compensation_missing", "Inverse completion and original batch state disagree.")
+
+    def _check_history_extension(self, original):
+        """Refuse an unreadable chain before claiming or executing a new inverse."""
+        seen = set()
+        cursor = original
+        while True:
+            if cursor["batch_id"] in seen:
+                raise LifecycleError("batch_corrupt", "Batch compensation history contains a cycle.")
+            seen.add(cursor["batch_id"])
+            if len(seen) >= _MAX_HISTORY:
+                raise LifecycleError("batch_history_limit", "This inverse would exceed the supported historical chain bound; no new inverse intent or effect was started.",
+                                     details={"batch_id": original["batch_id"]})
+            previous = cursor["plan"]["compensates_batch_id"]
+            if previous is None:
+                return
+            cursor = self._record(previous)["data"]
 
     def _put(self, tx):
         prior = self.repository.get("batch", tx["batch_id"])
@@ -161,7 +178,7 @@ class BatchManager:
     def _locks(self, plan):
         return self.manager._operation_locks([child["plan"] for child in plan["children"]])
 
-    def _validate(self, plan, *, static=False):
+    def _validate(self, plan, *, static=False, resolve_source=True):
         try:
             if not isinstance(plan, dict) or set(plan) != {"schema_version", "plan_id", "project_root", "created_at", "children", "compensates_batch_id", "compensates_revision", "uncompensated"}:
                 raise ValueError("batch plan fields")
@@ -182,6 +199,7 @@ class BatchManager:
             if type(plan["uncompensated"]) is not list or len(plan["uncompensated"]) > 50 or (not compensation and plan["uncompensated"]):
                 raise ValueError("uncompensated items")
             identifiers, targets, sources = set(), [], []
+            skills, versions = {}, {}
             references = []
             for child in plan["children"]:
                 if type(child) is not dict or set(child) != _CHILD_FIELDS or child["kind"] not in {"apply", "compensate"}:
@@ -195,7 +213,18 @@ class BatchManager:
                             or core.get("plan_id") != digest({key: value for key, value in core.items() if key != "plan_id"})):
                         raise ValueError("historical core plan envelope")
                 else:
-                    self.manager._validate_plan(child["plan"], physical_paths=False)
+                    self.manager._validate_plan(child["plan"], physical_paths=False,
+                                                resolve_source=resolve_source and child["kind"] != "compensate")
+                core = child["plan"]
+                skill_id = core["skill"]["skill_id"]
+                if skill_id in skills and skills[skill_id] != core["skill"]:
+                    raise ValueError("shared Skill definitions conflict")
+                skills[skill_id] = core["skill"]
+                version_id = core["version"]["version_id"]
+                facts = {key: core["version"][key] for key in ("version_id", "skill_id", "snapshot")}
+                if version_id in versions and versions[version_id] != facts:
+                    raise ValueError("shared version content definitions conflict")
+                versions[version_id] = facts
                 if child["kind"] == "apply" and child["transaction_id"] is not None:
                     raise ValueError("apply child cannot adopt a transaction")
                 if child["kind"] == "compensate":
@@ -232,6 +261,7 @@ class BatchManager:
             if compensation and not static:
                 original = self._record(plan["compensates_batch_id"])["data"]
                 self._history_proof(original)
+                self._check_history_extension(original)
                 known = {item["transaction_id"]: (child, item) for child, item in zip(original["plan"]["children"], original["children"])}
                 if any(reference not in known for reference in references):
                     raise ValueError("compensation refers outside its original batch")
@@ -349,7 +379,7 @@ class BatchManager:
                     raise LifecycleError("invalid_batch_plan", "Inverse plan omits a child with possible effects.", exit_code=2)
 
     def apply(self, plan, *, approve_plan_id, batch_id=None, actor="local-operator", checkpoint=None):
-        self._validate(plan)
+        self._validate(plan, resolve_source=False)
         if approve_plan_id != plan["plan_id"]:
             raise LifecycleError("approval_required", "Explicit approval must name the exact batch plan ID.")
         self.manager._actor(actor)
@@ -392,7 +422,7 @@ class BatchManager:
             return tx
         if mode != "resume":
             raise LifecycleError("invalid_recovery", "Batch compensation requires a new reviewed inverse plan; recovery supports inspect or resume.")
-        self._validate(tx["plan"])
+        self._validate(tx["plan"], resolve_source=False)
         if approve_plan_id != tx["plan"]["plan_id"]:
             raise LifecycleError("approval_required", "Explicit resume must name the recorded exact batch plan ID.")
         self.manager._actor(actor)
@@ -499,7 +529,7 @@ class BatchManager:
     def plan_compensation(self, batch_id):
         original = self._record(batch_id)
         tx = original["data"]
-        self._validate(tx["plan"])
+        self._validate(tx["plan"], resolve_source=False)
         with self._locks(tx["plan"]):
             original = self._record(batch_id)
             tx = original["data"]

@@ -13,6 +13,8 @@ from .engine import Manager, OPERATIONS
 from . import incidents, invocation, retention
 from .batch import BatchManager
 from .status import preflight, read_status, render_status, unknown_status
+from .context import action, manager_context, project_context
+from .pending import list_pending
 
 
 class _Parser(argparse.ArgumentParser):
@@ -163,6 +165,10 @@ def configure(parser):
     recover.add_argument("--approve-plan-id")
     recover.add_argument("--actor", default="local-operator", help="Local attribution label, not authenticated identity.")
     listing = commands.add_parser("list", help="List managed installation identities.")
+    listing.add_argument("--pending", action="store_true", help="Read-only paged discovery of unfinished core, batch and retention intents.")
+    listing.add_argument("--limit", type=int)
+    listing.add_argument("--after-kind")
+    listing.add_argument("--after-id")
     for command in [plan, apply, verify, status, flight, inspect, recover, listing] + _consumers(commands):
         command.add_argument("--format", choices=("text", "json"), default=argparse.SUPPRESS)
     return parser
@@ -331,14 +337,20 @@ def _consumer_execute(manager, arguments):
 
 def execute(arguments):
     command = arguments.lifecycle_command
+    # Validate requested ownership before any operation is allowed to create
+    # state. An invalid root must not reach a second error while rendering.
+    requested_context = project_context(arguments.project_root)
+    arguments.project_root = requested_context["project_root"]
     try:
         manager = Manager(arguments.project_root, create=command in {"plan", "apply"})
     except LifecycleError as error:
         if command in {"status", "preflight"}:
-            status = unknown_status(arguments.installation_id, reason=error.code, max_age_seconds=arguments.max_age_seconds)
+            status = unknown_status(arguments.installation_id, reason=error.code, max_age_seconds=arguments.max_age_seconds,
+                                    project_root=arguments.project_root)
             return (status if command == "status" else {"decision": "block", "exit_code": 3, "status": status}), 3
         raise
     try:
+        arguments._context = manager_context(manager)
         if command == "plan":
             legacy = _read_object(arguments.legacy_receipt) if arguments.legacy_receipt else None
             plan = manager.plan(arguments.operation, source=arguments.source, target=arguments.target,
@@ -369,6 +381,11 @@ def execute(arguments):
         if command == "recover":
             return manager.recover(arguments.transaction_id, mode=arguments.mode, approve_plan_id=arguments.approve_plan_id, actor=arguments.actor), 0
         if command == "list":
+            if arguments.pending:
+                return list_pending(manager, limit=50 if arguments.limit is None else arguments.limit,
+                                    after_kind=arguments.after_kind, after_id=arguments.after_id), 0
+            if any(value is not None for value in (arguments.limit, arguments.after_kind, arguments.after_id)):
+                raise LifecycleError("invalid_pending_input", "Pending pagination requires --pending.", exit_code=2)
             return {"schema_version": "skills-auditor-lifecycle-list/v1", "installations": manager.list_installations()}, 0
         return _consumer_execute(manager, arguments)
     finally:
@@ -389,21 +406,16 @@ def _recovery_text(payload, project_root=None):
     if (not isinstance(identifier, str) or not identifier or len(identifier) > 200
             or identifier in {".", ".."} or any(ord(char) < 32 or ord(char) == 127 or char in "/\\" for char in identifier)):
         return ""
-    command = ["skills-audit", "lifecycle"]
-    if project_root is not None:
-        project = os.path.abspath(str(project_root))
-        if len(project) > 4096 or any(ord(char) < 32 or ord(char) == 127 for char in project):
-            return ""
-        command += ["--project-root", project]
+    command = []
     if kind == "batch_id":
         command += ["batch", "inspect"] + (["--"] if identifier.startswith("-") else []) + [identifier]
     else:
-        if payload.get("code", "").startswith("retention_"):
+        if payload.get("code", "").startswith("retention_") or details.get("kind") == "retention-transaction":
             command.append("retention")
         command += (["recover", "--mode", "inspect", "--", identifier] if identifier.startswith("-")
                     else ["recover", identifier, "--mode", "inspect"])
     return "\nRecovery reference: {}={}\nNext (read-only): {}\nInspect recorded state first. Resume or compensate only with explicit approval; permanent purge also requires its separate deletion authorization.".format(
-        kind, shlex.quote(identifier), " ".join(shlex.quote(part) for part in command))
+        kind, shlex.quote(identifier), action(project_root, command)["command"])
 
 
 def _render(payload, *, project_root=None):
@@ -419,11 +431,14 @@ def _render(payload, *, project_root=None):
     if "severity" in payload and "approval" in payload:
         return render_status(payload)
     if payload.get("schema_version") == "skills-auditor-lifecycle-error/v1":
-        return "[BLOCK] {}: {}".format(payload["code"], payload["message"]) + _recovery_text(payload, project_root)
+        return "[BLOCK] {}: {}\nProject: {} (context verified={})".format(payload["code"], payload["message"],
+            payload.get("project_root", project_root) or "unknown", payload.get("context_verified", False)) + _recovery_text(payload, project_root)
     if "approval" in payload:
-        return "{} approval={}\nReasons: {}\nNext: generate a fresh lifecycle plan, review it, and explicitly approve its exact plan ID.\n{}".format(
+        identifier = payload["installation_id"]
+        navigation = action(project_root, ["status"] + (["--"] if identifier.startswith("-") else []) + [identifier])
+        return "{} approval={}\nReasons: {}\nNext: {}\nRead current status, then generate a fresh lifecycle plan when required, review it, and explicitly approve its exact plan ID.\n{}".format(
             "[OK]" if payload.get("valid") else "[BLOCK]", payload["approval"]["state"],
-            ", ".join(payload["approval"]["reason_codes"]) or "none", json.dumps(payload, ensure_ascii=False, indent=2))
+            ", ".join(payload["approval"]["reason_codes"]) or "none", navigation["command"], json.dumps(payload, ensure_ascii=False, indent=2))
     if "plan_id" in payload and payload.get("schema_version", "").endswith("plan/v1"):
         return "[PLAN] {} {}\nReview sources, targets and before/after states; approval must name this exact plan ID.\n{}".format(payload.get("operation", payload["schema_version"]), payload["plan_id"], json.dumps(payload, ensure_ascii=False, indent=2))
     return json.dumps(payload, ensure_ascii=False, indent=2)
@@ -433,6 +448,7 @@ def main(argv=None, *, prog="skills-audit lifecycle"):
     argv = list(sys.argv[1:] if argv is None else argv)
     output_format = "text"
     project_root = None
+    arguments = None
     for index, argument in enumerate(argv):
         if argument == "--format" and index + 1 < len(argv):
             output_format = argv[index + 1]
@@ -451,5 +467,14 @@ def main(argv=None, *, prog="skills-audit lifecycle"):
     except (OSError, ValueError, TypeError, KeyError) as error:
         error = LifecycleError("operation_failed", "Managed operation failed; inspect recorded transactions and current state before retrying: {}".format(str(error)[:500]))
         payload, code = error.to_dict(), 3
+    if payload.get("schema_version") == "skills-auditor-lifecycle-error/v1":
+        try:
+            context = ({"project_root": payload["details"].get("project_root"), "context_verified": False}
+                       if payload["code"] == "project_context_changed" else
+                       getattr(arguments, "_context", None) or project_context(project_root))
+            payload = {**payload, **context}
+        except (LifecycleError, OSError, ValueError, TypeError, RuntimeError):
+            payload = {**payload, "project_root": None, "context_verified": False}
+        project_root = payload["project_root"]
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True) if output_format == "json" else _render(payload, project_root=project_root))
     return code

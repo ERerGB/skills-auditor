@@ -1,6 +1,7 @@
 """Atomic status projections and host-neutral, point-in-time preflight policy.
 
-The cached reader performs no filesystem inspection and never grants approval.
+The cached reader checks only project ownership metadata, not Skill bytes,
+and never grants approval.
 Only a durable completed verification publishes a derived projection. A failed
 projection cannot roll back a denial; an in-progress run fences cached use.
 Freshness is recomputed at read time, not trusted from disk. A host
@@ -9,9 +10,9 @@ of semantic safety or continuous enforcement.
 """
 
 from datetime import datetime, timezone
-from shlex import quote
 
 from .common import LifecycleError
+from .context import action, manager_context, project_context
 
 
 SCHEMA_VERSION = "skills-auditor-status/v1"
@@ -109,23 +110,33 @@ def _finish(status, now, max_age_seconds):
     status["freshness"] = freshness
     status["assessed_at"] = now.isoformat(timespec="microseconds").replace("+00:00", "Z")
     status["reason_codes"] = list(dict.fromkeys(reasons))
-    identifier = quote(status["installation_id"] or "<installation-id>")
+    return _next_action(status)
+
+
+def _next_action(status):
+    identifier = status["installation_id"] or "<installation-id>"
+    missing = [] if status["installation_id"] else ["installation_id"]
+    state, reasons = status["lifecycle_state"], status["reason_codes"]
     if state in {"disabled", "archived"}:
-        command = "skills-audit lifecycle plan enable --installation-id " + identifier
+        arguments = ["plan", "enable", "--installation-id", identifier]
         message = "This installation is not active. Investigate any integrity failure first; valid retained bytes and an explicitly approved enable plan are required before use."
     elif state == "uninstalled":
-        command = "skills-audit lifecycle plan install --source <candidate> --target <installation-target>"
+        arguments = ["plan", "install", "--source", "<candidate>", "--target", "<installation-target>"]
+        missing = ["source", "target"]
         message = "This installation is historical. A new installation requires a reviewed and explicitly approved plan."
     elif status["approval"]["state"] == "invalidated":
         operation = "update" if "snapshot_tree" in reasons else "renew"
-        command = "skills-audit lifecycle plan " + operation + " --installation-id " + identifier
+        arguments = ["plan", operation, "--installation-id", identifier]
         if operation == "update":
-            command += " --source <reviewed-candidate>"
+            arguments += ["--source", "<reviewed-candidate>"]
+            missing.append("source")
         message = "Investigate the referenced verification; repair or replace the candidate, review a new plan and explicitly approve it."
     else:
-        command = "skills-audit lifecycle verify " + identifier
+        arguments = ["verify"] + (["--"] if identifier.startswith("-") else []) + [identifier]
         message = "Verify immediately before use. This is a point-in-time observation, not continuous enforcement or semantic safety."
-    status["recommended_next_action"] = {"command": command, "message": message}
+        if "repository_missing" in reasons:
+            message = "No existing repository was found in this requested project. Preserve targets/store and restore trusted state if it was lost; verification and an empty new registry do not restore historical approval."
+    status["recommended_next_action"] = {**action(status.get("project_root"), arguments, required_inputs=missing), "message": message}
     return status
 
 
@@ -150,12 +161,14 @@ def _base(installation_id, installation=None):
     }
 
 
-def unknown_status(installation_id=None, *, reason="repository_missing", now=None, max_age_seconds=DEFAULT_MAX_AGE_SECONDS):
+def unknown_status(installation_id=None, *, reason="repository_missing", now=None, max_age_seconds=DEFAULT_MAX_AGE_SECONDS,
+                   project_root=None, context_verified=False):
     """Build a fail-closed status even when opening read-only state failed."""
     now = _policy(now, max_age_seconds)
     if (installation_id is not None and not _text(installation_id)) or not _text(reason):
         raise LifecycleError("invalid_status_input", "Status identity and reason must be bounded strings.", exit_code=2)
     status = _base(installation_id)
+    status.update(project_context(project_root, verified=context_verified))
     status["reason_codes"].append(reason)
     return _finish(status, now, max_age_seconds)
 
@@ -205,7 +218,7 @@ def _attach_incidents(repository, status):
     return status
 
 
-def read_status(manager, installation_id, *, now=None, max_age_seconds=DEFAULT_MAX_AGE_SECONDS):
+def _read_status(manager, installation_id, *, now=None, max_age_seconds=DEFAULT_MAX_AGE_SECONDS):
     """Read a projection conservatively; never inspect candidates or write state."""
     now = _policy(now, max_age_seconds)
     if not _text(installation_id):
@@ -279,17 +292,28 @@ def read_status(manager, installation_id, *, now=None, max_age_seconds=DEFAULT_M
     return _finish(status, now, max_age_seconds)
 
 
+def read_status(manager, installation_id, *, now=None, max_age_seconds=DEFAULT_MAX_AGE_SECONDS):
+    """Attach navigation to the owning reader, never trust a cached path field."""
+    manager_context(manager)
+    status = _read_status(manager, installation_id, now=now, max_age_seconds=max_age_seconds)
+    status.update(manager_context(manager))
+    return _next_action(status)
+
+
 def preflight(manager, installation_id, *, refresh=False, now=None, max_age_seconds=DEFAULT_MAX_AGE_SECONDS):
     """Fresh valid active: proceed/0; stale cached valid: warn/4; other: block/3."""
     supplied_now = now
     now = _policy(now, max_age_seconds)
     if type(refresh) is not bool or not _text(installation_id):
         raise LifecycleError("invalid_status_input", "refresh must be a boolean and an installation ID is required.", exit_code=2)
+    manager_context(manager)
     if refresh:
         try:
             manager.verify(installation_id)
         except (LifecycleError, OSError, ValueError):
-            status = unknown_status(installation_id, reason="verification_failed", now=now, max_age_seconds=max_age_seconds)
+            context = manager_context(manager)
+            status = unknown_status(installation_id, reason="verification_failed", now=now, max_age_seconds=max_age_seconds,
+                                    **context)
             return {"decision": "block", "exit_code": 3, "status": status}
         if supplied_now is None:
             now = _policy(None, max_age_seconds)
@@ -307,5 +331,6 @@ def render_status(status):
         marker, status["installation_id"] or "unknown installation", status["approval"]["state"], status["authorization_state"], status["lifecycle_state"], freshness["state"], age,
         ", ".join(status["reason_codes"]) or "none", status["recommended_next_action"]["command"], status["recommended_next_action"]["message"])
     for identifier in status.get("incident_ids", []):
-        rendered += "\nInvestigate: skills-audit lifecycle inspect incident " + quote(identifier)
-    return rendered
+        arguments = ["inspect", "incident"] + (["--"] if identifier.startswith("-") else []) + [identifier]
+        rendered += "\nInvestigate: " + action(status.get("project_root"), arguments)["command"]
+    return rendered + "\nProject: {} (context verified={})".format(status.get("project_root") or "unknown", status.get("context_verified", False))

@@ -158,3 +158,13 @@ Tests include controlled I/O failures and real subprocess termination. A process
 death test proves protocol recovery at a selected durable boundary; it does not
 simulate disk firmware, power loss, every possible scheduler interleaving or an
 adversarial privileged writer. Coverage reports must retain that distinction.
+
+## Model-first combination acceptance
+
+Further pre-merge review exposed shared-version batch admission, nested-inverse
+history, project-scoped guidance and pending-retention discovery gaps. The
+[state model](lifecycle-state-model.md) freezes the existing feature scope and
+defines object ownership, immutable facts versus projections, all operation
+transitions, I01–I12 global invariants and S01–S08 sequence/crash families.
+Complete that model and its executable oracle before repairing the individual
+findings. A green isolated-operation suite is not sufficient to close this gate.

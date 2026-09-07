@@ -19,6 +19,7 @@ import re
 import uuid
 
 from .common import LifecycleError, canonical_json, digest, utc_now
+from .context import action, manager_context
 
 
 _SCHEMA = "skills-auditor-incident/v1"
@@ -439,6 +440,7 @@ def investigate(manager, incident_id, *, limit=50, after_sequence=None):
     if (type(limit) is not int or not 1 <= limit <= 50
             or after_sequence is not None and (type(after_sequence) is not int or after_sequence < 0)):
         raise _invalid("Investigation limit must be an integer from 1 to 50 and cursor a nonnegative integer.")
+    manager_context(manager)
     incident = get_incident(manager, incident_id)
     events = manager.repository.events("incident:" + incident_id, limit=limit + 1, after_sequence=after_sequence)
     selected = events[:limit]
@@ -446,13 +448,16 @@ def investigate(manager, incident_id, *, limit=50, after_sequence=None):
     # Repository checks checksums and append-only guards. Project only our
     # documented payload fields, never generic external record contents.
     packet_events = [_event_view(event, incident_id) for event in selected]
-    next_action = "skills-audit lifecycle investigate " + incident_id
+    arguments = ["investigate", incident_id]
     if has_more:
-        next_action += " --after-sequence " + str(selected[-1]["sequence"]) + " --limit " + str(limit)
+        arguments += ["--after-sequence", str(selected[-1]["sequence"]), "--limit", str(limit)]
+    context = manager_context(manager)
     return {"schema_version": "skills-auditor-investigation/v1", "incident": {key: incident[key] for key in _FIELDS},
+            **context,
             "events": packet_events, "returned_events": len(selected), "has_more": has_more, "truncated": has_more,
-            "continuation": {"after_sequence": selected[-1]["sequence"]} if has_more else None,
-            "next_action": next_action,
+            "continuation": {"after_sequence": selected[-1]["sequence"], "project_root": context["project_root"],
+                             "incident_id": incident_id, "limit": limit} if has_more else None,
+            "next_action": action(context["project_root"], arguments)["command"],
             "limits": {"max_events": limit, "note_max_bytes": 4096},
             "notice": "Local actor/tool labels are attribution, not authenticated identity. Disposition is not approval; verify and explicitly approve a new plan to restore authorization."}
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import unittest
 import runpy
+import ast
+import tempfile
 from pathlib import Path
 
 
@@ -11,6 +13,26 @@ PROJECT_ROOT = Path(__file__).parents[1]
 
 
 class TestCiContract(unittest.TestCase):
+    def test_installed_e2e_copies_only_the_stdlib_test_oracle_not_product_sources(self) -> None:
+        runner = runpy.run_path(str(PROJECT_ROOT / "scripts" / "run_artifact_tests.py"))
+        with tempfile.TemporaryDirectory(prefix="skills-model-suite-") as directory:
+            root = Path(directory)
+            runner["copy_suite"]("e2e", root / "e2e")
+            runner["copy_suite"]("smoke", root / "smoke")
+            copied = root / "e2e" / "lifecycle_model.py"
+            source = PROJECT_ROOT / "tests" / "lifecycle_model.py"
+            self.assertEqual(copied.read_bytes(), source.read_bytes())
+            self.assertFalse((root / "smoke" / "lifecycle_model.py").exists())
+            self.assertFalse((root / "e2e" / "skills_auditor").exists())
+            self.assertFalse((root / "e2e" / "tests").exists())
+            imports = set()
+            for node in ast.walk(ast.parse(copied.read_text())):
+                if isinstance(node, ast.Import):
+                    imports.update(alias.name.split(".")[0] for alias in node.names)
+                elif isinstance(node, ast.ImportFrom):
+                    imports.add(node.module.split(".")[0])
+            self.assertLessEqual(imports, {"copy", "hashlib", "json", "os", "pathlib", "sqlite3", "stat"})
+
     def test_distribution_checks_every_public_module_and_schema(self) -> None:
         contract = runpy.run_path(str(PROJECT_ROOT / "scripts" / "check_distribution.py"))
         package = PROJECT_ROOT / "skills_auditor"

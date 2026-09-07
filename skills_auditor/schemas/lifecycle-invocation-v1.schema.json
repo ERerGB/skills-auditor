@@ -118,6 +118,8 @@
         "schema_version": {
           "const": "skills-auditor-invocation/v1"
         },
+        "project_root": {"type": "string", "pattern": "^/", "maxLength": 4096},
+        "context_verified": {"type": "boolean"},
         "invocation_id": {
           "$ref": "#/$defs/id"
         },

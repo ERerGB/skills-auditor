@@ -12,7 +12,7 @@
     {"$ref": "#/$defs/snapshot_descriptor"},
     {"$ref": "#/$defs/snapshot_manifest"}, {"$ref": "#/$defs/snapshot_stage"},
     {"$ref": "#/$defs/verification_run"}, {"$ref": "#/$defs/installation_list"},
-    {"$ref": "#/$defs/preflight"}
+    {"$ref": "#/$defs/preflight"}, {"$ref": "#/$defs/pending_list"}
   ],
   "$defs": {
     "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$"},
@@ -294,6 +294,8 @@
       "type": "object", "additionalProperties": false,
       "required": ["schema_version", "code", "message", "details"],
       "properties": {
+        "project_root": {"type": ["string", "null"], "pattern": "^/", "maxLength": 4096},
+        "context_verified": {"type": "boolean"},
         "schema_version": {"const": "skills-auditor-lifecycle-error/v1"},
         "code": {"$ref": "#/$defs/label"}, "message": {"type": "string"}, "details": {"type": "object"}
       }
@@ -311,6 +313,51 @@
       "if": {"properties": {"state": {"const": "completed"}}},
       "then": {"required": ["completed_at"]},
       "else": {"properties": {"completed_at": false}}
+    },
+    "pending_reference": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "id"],
+      "properties": {
+        "kind": {"enum": ["batch", "transaction", "retention-transaction"]},
+        "id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f/\\\\]+$"}
+      }
+    },
+    "pending_cursor": {
+      "type": "object", "additionalProperties": false, "required": ["after_kind", "after_id"],
+      "properties": {
+        "after_kind": {"enum": ["batch", "transaction", "retention-transaction"]},
+        "after_id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f/\\\\]+$"}
+      }
+    },
+    "pending_list": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "project_root", "context_verified", "pending", "limit", "has_more", "continuation"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-lifecycle-pending-list/v1"},
+        "project_root": {"type": "string", "pattern": "^/", "maxLength": 4096}, "context_verified": {"const": true},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100}, "has_more": {"type": "boolean"},
+        "continuation": {"anyOf": [{"$ref": "#/$defs/pending_cursor"}, {"type": "null"}]},
+        "pending": {"type": "array", "maxItems": 100, "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "id", "state", "plan_id", "parents", "children", "inspection"],
+          "properties": {
+            "kind": {"enum": ["batch", "transaction", "retention-transaction"]},
+            "id": {"type": "string", "minLength": 1, "maxLength": 200},
+            "state": {"enum": ["prepared", "applying", "recovery_needed", "compensating"]},
+            "plan_id": {"$ref": "#/$defs/hash"},
+            "parents": {"type": "array", "maxItems": 100, "uniqueItems": true, "items": {"$ref": "#/$defs/pending_reference"}},
+            "children": {"type": "array", "maxItems": 50, "uniqueItems": true, "items": {"$ref": "#/$defs/pending_reference"}},
+            "inspection": {"type": "object", "additionalProperties": false, "required": ["command", "argv", "required_inputs"],
+              "properties": {
+                "command": {"type": "string", "minLength": 1, "maxLength": 20000},
+                "argv": {"type": "array", "minItems": 6, "maxItems": 54, "items": {"type": "string", "maxLength": 4096}},
+                "required_inputs": {"type": "array", "maxItems": 0}
+              }}
+          }
+        }}
+      },
+      "if": {"properties": {"has_more": {"const": true}}},
+      "then": {"properties": {"pending": {"minItems": 1}, "continuation": {"$ref": "#/$defs/pending_cursor"}}},
+      "else": {"properties": {"continuation": {"type": "null"}}}
     },
     "installation_list": {
       "type": "object", "additionalProperties": false,

@@ -225,6 +225,20 @@ class Repository:
             raise LifecycleError("invalid_record", "record kind must be a nonempty bounded string")
         return [self._record(row) for row in self._query("SELECT * FROM records WHERE kind=? ORDER BY id", (kind,))]
 
+    def page(self, kind: str, *, limit: int = 100, after_id: Optional[str] = None):
+        """Read at most limit validated records using a stable per-kind ID cursor."""
+        if (not _label(kind) or type(limit) is not int or not 1 <= limit <= 1000
+                or (after_id is not None and not _label(after_id))):
+            raise LifecycleError("invalid_record", "Invalid record page kind, limit or cursor.", exit_code=2)
+        sql = "SELECT * FROM records WHERE kind=?"
+        parameters = [kind]
+        if after_id is not None:
+            sql += " AND id>?"
+            parameters.append(after_id)
+        sql += " ORDER BY id LIMIT ?"
+        parameters.append(limit)
+        return [self._record(row) for row in self._query(sql, parameters)]
+
     def put(self, kind: str, id: str, data: Dict[str, Any], expected_revision: int = 0) -> Dict[str, Any]:
         if not _label(kind) or not _label(id) or not isinstance(data, dict) or type(expected_revision) is not int or expected_revision < 0:
             raise LifecycleError("invalid_record", "invalid record identity, data or expected revision")

@@ -16,7 +16,7 @@ host coordination are not supported guarantees.
 | Record | Meaning |
 | --- | --- |
 | Skill | Stable identity, independent of a directory or display name |
-| Version | Content identity and per-Skill parent/provenance; historical records remain available |
+| Version | Content identity within a Skill and its first recorded origin; later adoptions keep their own exact plans |
 | Installation | Stable identity, target path, selected version and lifecycle state |
 | Grant | Explicit approval of an exact plan, version, target and installation generation |
 | Transaction | Durable intent, individual step states, errors and recovery evidence |
@@ -31,9 +31,21 @@ has invalidated a grant, restoring H1's bytes does not renew that grant. Explici
 revocation also survives later successful integrity checks. Review and approve a
 new transaction to establish new authorization.
 
-Version IDs include Skill identity and content provenance. Snapshot storage can
-deduplicate identical normalized bytes across Skills without merging their
-identities or rewriting either version's lineage.
+Version IDs bind Skill identity, source tree hash, normalized snapshot hash and
+normalization version. Source path, plan time, operation and adoption parent are
+not part of that content key. Two installations of one Skill can therefore adopt
+the same content from independently reviewed plans, including different source
+paths or previous versions.
+
+The first committed version record retains its original `source`, `created_at`,
+`parent_version_id` and `provenance`. A later adoption does not rewrite that
+origin, including when it migrates a legacy installation. Its own exact saved
+transaction plan records the current source, operation, legacy receipt if any,
+and before/after selection. Read that plan for adoption history, rather than
+assuming the version's origin describes every installation. Snapshot storage can
+also deduplicate identical normalized bytes across different Skills without
+merging their identities or lineage. Plans still bind their exact reviewed
+content and all occurrence-specific operands.
 
 ## First managed installation
 
@@ -158,9 +170,15 @@ not proof that the old payload is healthy: observed damage remains denied and a
 new repair still needs approval. Actually restoring an old pointer requires a
 valid retained snapshot; compensation never installs known damaged old bytes.
 
-Once approved bytes have been staged durably, resume uses those bytes rather than
-silently adopting a subsequently edited candidate. Inspect before retrying after
-an uncertain journal or receipt write. Preserve temporary artifacts until the
+Once the transaction has durably recorded `snapshot_ready: true`, resume uses
+those approved snapshot bytes rather than adopting a subsequently edited
+candidate. Before that readiness record, including a crash after snapshot
+publication but before the record commits, resume still requires the exact
+reviewed source. A changed or missing source must be restored by its owner or
+the unfinished work explicitly compensated; it is never silently substituted.
+Readable state/store, intact required retained bytes and nonconflicting target
+ownership remain recovery prerequisites. Inspect before retrying after an
+uncertain journal or receipt write. Preserve temporary artifacts until the
 transaction and ownership are understood; an absent receipt is not proof of no
 filesystem effects.
 
@@ -169,6 +187,33 @@ read-only inspection command. If writing the failure journal also fails, the
 structured error retains both failures and the recovery ID. Inspect that ID
 before choosing resume or compensation; an uncertain response never authorizes
 replaying effects or permanent deletion.
+
+If the process exited before returning its generated ID, discover unfinished
+work in the original project without needing an installation record:
+
+```bash
+skills-audit lifecycle --project-root '/project with spaces' list --pending \
+  --limit 50 --format json
+```
+
+The result lists core `transaction`, parent/inverse `batch`, and
+`retention-transaction` intents with their IDs, states, approved plan IDs and
+read-only `inspection` actions. Core children include parent references; batches
+include deterministic child references, which may precede a child's own WAL.
+These are different records, not duplicate authorization. Completed and
+compensated work is excluded. A newly rejected plan/apply request reports the
+original unfinished ID rather than creating an unrelated recovery task.
+
+Pages default to 50 entries and accept 1–100. When `has_more` is true, pass both
+`continuation.after_kind` and `continuation.after_id` as `--after-kind` and
+`--after-id` on the next request to the same project. Ordering is by kind/ID,
+not execution time. Discovery record fetches and output pages are bounded, but
+locating unfinished work and validating parent/history proofs can scan metadata
+and load existing event streams. Total I/O and memory depend on that history;
+this is not constant-resource discovery. Listing and its inspection actions do not read candidate payloads,
+initialize absent state or choose recovery automatically. Missing/corrupt state
+is an error, not an empty healthy catalog. Stages and verification fences retain
+their existing diagnostics; this view is not a global filesystem audit.
 
 Locks serialize cooperating writers across overlapping physical target parents,
 including separate project stores. Lock files are persistent and must not be
@@ -202,6 +247,15 @@ child has a deterministic transaction identity, its own durable steps and receip
 If a later child fails, earlier completed changes remain visible and the parent
 reports recovery needed. No all-or-nothing claim applies across installations.
 
+Shared content is allowed: two existing installations of the same Skill can
+independently plan adoption of H2 and apply both plans in either reviewed child
+order. The first committed origin is retained; the other child's exact adoption
+plan remains unchanged. Conflicting definitions of a shared Skill or content
+identity are rejected before the first child effect. During a crash after only
+one child commits, H2/H1 can legitimately be visible; recovery resumes the saved
+H2 rollout or follows an explicitly approved inverse, never inventing a new
+approval from the partial state.
+
 Resume requires explicit approval of the recorded parent plan and validates
 completed children without replaying their effects. Compensation requires a new
 inverse batch plan and its own explicit approval. It restores unfinished owned
@@ -216,6 +270,19 @@ that this list is empty. The original parent is marked compensated only when all
 required owned effects have verified inverses; unresolved items stay visible.
 Starting an approved inverse fences forward resume of the original parent.
 Never revive an old grant or overwrite foreign data merely to finish a batch.
+
+Completion is historical. If A completes, inverse B completes, and a newly
+approved inverse C later compensates B, both A and B retain their original
+completion receipts/events. Their current `compensated` state does not erase
+what completed earlier. History inspection and retention validate those bound
+proofs without requiring historical payloads to remain on disk after legitimate
+purge. Missing or contradictory proof still blocks the operation.
+
+Compensation chains are bounded to 50 batches. An inverse that would exceed the
+bound is refused with `batch_history_limit` before a new inverse intent or host
+effect. Existing ancestors remain inspectable; an ordinary newly reviewed
+lifecycle operation is still available. This limit is not permission to remove
+historical records or silently drop a chain from reference validation.
 
 For two already saved core plans, create and review the parent before applying:
 
@@ -266,6 +333,19 @@ observation begins does not itself revoke approval.
 Adapters may render the status as an icon or badge. No IDE integration or
 continuous monitor is implied by this contract. A host that ignores preflight
 can still read a pointer; Skills Auditor does not execute or sandbox the Skill.
+
+Status, nested preflight/invocation status, investigation pages and error output
+retain `project_root`. `context_verified: false` means the requested project is
+known but its repository context was not established; it is not a verified owner
+or healthy installation. Running a suggested command from another working
+directory must still select this explicit project.
+
+Status recommendations and pending inspection actions provide a shell-quoted
+`command`, `argv` and `required_inputs`. Prefer concrete `argv` for an adapter;
+do not split the display command on spaces. When source, target or another input
+is missing, `argv` is null and `required_inputs` names the missing fields: the
+displayed command is a template, not an executable repair. Supplying inputs or
+following a diagnostic does not approve a plan.
 
 ## Investigation and resolution
 
@@ -369,7 +449,11 @@ lineage remain historical evidence. A retention policy keeps the three most rece
 versions per Skill by default; explicit version pins add retained payloads.
 Active, disabled and archived installations, current approval evidence, unresolved
 incidents, unexpired receipt/incident references, live overrides and unfinished
-transactions protect their referenced snapshots.
+transactions protect their referenced snapshots. Unfinished parent and inverse
+batches protect their before/after references even before any child transaction
+exists. Releasing one root does not release another installation's references to
+the same content. Completed metadata remains readable after approved payload
+expiry and purge; it does not pin every historical payload forever.
 
 Cleanup is a series of separate reviewed plans:
 
@@ -394,7 +478,9 @@ at the effect boundary, not only when the plan is written. Foreign entries,
 uncertain ownership, changed content or unreadable state stop the operation.
 
 Interrupted collection can be resumed or explicitly compensated. A completed
-collection instead needs a new restore plan. Interrupted purge retains per-entry
+collection instead needs a new restore plan. Interrupted restore, policy and
+expiry resume their exact approved intent; they do not offer compensation.
+Interrupted purge retains per-entry
 intent and an honest partial-deletion tombstone for explicit resume; no successful
 receipt is published for partial deletion. Do not manually remove quarantine,
 staging directories, locks or evidence to bypass these checks.

@@ -9,9 +9,302 @@ import tempfile
 import time
 import unittest
 import unicodedata
+from types import SimpleNamespace
+
+from lifecycle_model import ModelOracle, normalized_tree, tree_state
 
 
 CLI = Path(os.environ["SKILLS_AUDITOR_CLI"])
+
+
+class TestInstalledManagedModelContext(unittest.TestCase):
+    """S05/S06 run the installed package, with the same independent oracle."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="skills-installed-model-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.project = self.root / "owner's project with spaces"
+        self.project.mkdir()
+        self.outside = self.root / "unrelated cwd"
+        self.outside.mkdir()
+        self.source = self.root / "candidate"
+        self.source.mkdir()
+        (self.source / "SKILL.md").write_text("# Installed model fixture\n")
+        (self.source / "payload").write_text("H1")
+        self.candidate_before = tree_state(self.source)
+        self.target = self.project / "host entry"
+        self.oracle = ModelOracle(self, SimpleNamespace(project_root=self.project))
+        self.oracle.watch_pointer(self.target, None)
+        self.model_trees = {}
+        self.snapshot_inodes = {}
+        self.pointer_inodes = {}
+
+    def after_action(self):
+        self.assertEqual(tree_state(self.source), self.candidate_before)
+        self.assertFalse((self.outside / ".skills-auditor-local").exists())
+        if self.oracle.database.exists():
+            self.oracle.check()
+            for path, inode in list(self.snapshot_inodes.items()):
+                if path.exists():
+                    self.assertEqual(path.stat().st_ino, inode, "An existing immutable snapshot tree was rebuilt")
+            for path, (kind, expected) in self.oracle.paths.items():
+                if kind == "tree" and expected is not None and path.exists():
+                    self.snapshot_inodes.setdefault(path, path.stat().st_ino)
+                elif kind == "pointer":
+                    actual = (os.readlink(path), path.lstat().st_ino) if path.is_symlink() else None
+                    if path in self.pointer_inodes and self.pointer_inodes[path][0] == expected:
+                        self.assertEqual(actual, self.pointer_inodes[path][1], "An unchanged selected pointer was rebuilt")
+                    self.pointer_inodes[path] = (expected, actual)
+
+    def remember_plan(self, plan, *, source=None):
+        if "version" in plan:
+            version = plan["version"]
+            if source is not None:
+                self.model_trees[version["version_id"]] = normalized_tree(tree_state(source))
+            self.assertIn(version["version_id"], self.model_trees)
+
+    def expect_effect(self, plan):
+        if "children" in plan:
+            for child in plan["children"]:
+                self.expect_effect(child["plan"])
+            return
+        version = plan["version"]
+        snapshot = version["snapshot"]["path"]
+        self.oracle.watch_tree(snapshot, self.model_trees[version["version_id"]])
+        self.oracle.watch_pointer(plan["after"]["target"], snapshot if plan["after"]["state"] == "active" else None)
+
+    def cli(self, *arguments, expected=0, text=False, project=None):
+        result = subprocess.run([str(CLI), "lifecycle", "--project-root", str(project or self.project),
+                                 "--format", "text" if text else "json", *map(str, arguments)],
+                                cwd=self.outside, capture_output=True, text=True, timeout=30)
+        self.after_action()
+        self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+        self.assertEqual(result.stderr, "")
+        return result.stdout if text else json.loads(result.stdout)
+
+    def emitted(self, command, *, expected=0):
+        arguments = shlex.split(command)
+        self.assertEqual(arguments[:2], ["skills-audit", "lifecycle"])
+        self.assertIn("--project-root", arguments)
+        self.assertEqual(arguments[arguments.index("--project-root") + 1], str(self.project))
+        result = subprocess.run([str(CLI), "lifecycle", "--format", "json", *arguments[2:]], cwd=self.outside,
+                                capture_output=True, text=True, timeout=30)
+        self.after_action()
+        self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+        self.assertEqual(result.stderr, "")
+        return json.loads(result.stdout)
+
+    def test_installed_s05_exported_status_investigation_and_unknown_context_from_other_cwd(self):
+        path = self.project / "install.json"
+        plan = self.cli("plan", "install", "--source", self.source, "--target", self.target, "--plan-out", path)
+        self.remember_plan(plan, source=self.source)
+        self.expect_effect(plan)
+        receipt = self.cli("apply", path, "--approve-plan-id", plan["plan_id"])
+        identifier = receipt["installation_id"]
+        self.cli("verify", identifier)
+        for command in (("status", identifier), ("preflight", identifier, "--cached"),
+                        ("invocation", "select", identifier, "--cached")):
+            value = self.cli(*command)
+            status = value.get("status", value)
+            self.assertEqual(status.get("project_root"), str(self.project))
+            self.assertIs(status.get("context_verified"), True)
+            self.assertEqual(self.emitted(status["recommended_next_action"]["command"])["installation_id"], identifier)
+            text = self.cli(*command, text=True)
+            suggested = next(line[6:] for line in text.splitlines() if line.startswith("Next: "))
+            self.assertEqual(self.emitted(suggested)["installation_id"], identifier)
+        self.target.unlink()
+        self.oracle.watch_pointer(self.target, None)
+        self.after_action()
+        failed = self.cli("verify", identifier, expected=3)
+        incident = self.cli("incidents")["incidents"][0]["incident_id"]
+        self.cli("append-note", incident, "--text", "Evidence belongs to the original project", "--actor", "installed-reviewer",
+                 "--tool", "installed-model", "--evidence-ref", "verification:" + failed["verification_id"])
+        first = self.cli("investigate", incident, "--limit", "1")
+        self.assertEqual(first.get("project_root"), str(self.project))
+        following = self.emitted(first["next_action"])
+        self.assertEqual(following["incident"]["incident_id"], incident)
+        self.assertEqual(following["events"][0]["event_type"], "note")
+        self.assertGreater(following["events"][0]["sequence"], first["events"][-1]["sequence"])
+        text = self.cli("status", identifier, expected=3, text=True)
+        for line in text.splitlines():
+            if line.startswith("Investigate: "):
+                self.assertEqual(self.emitted(line[len("Investigate: "):])["incident_id"], incident)
+        self.assertEqual(self.cli("inspect", "receipt", receipt["receipt_id"]), receipt)
+        for project in (self.project, self.root / "missing owner's project"):
+            project.mkdir(exist_ok=True)
+            value = self.cli("status", "unknown", project=project, expected=3)
+            self.assertEqual(value.get("project_root"), str(project))
+            self.assertIs(value.get("context_verified"), project == self.project)
+            self.assertIn(str(project), self.cli("status", "unknown", project=project, expected=3, text=True))
+        self.assertFalse((self.root / "missing owner's project" / ".skills-auditor-local").exists())
+
+    def test_installed_s06_discover_generated_core_batch_and_retention_ids_after_process_death(self):
+        owner = self.project
+        for kind, boundary in (("transaction", "transaction:prepared"),
+                               ("batch", "batch:child:0:transaction:prepared"),
+                               ("retention-transaction", "retention:prepared")):
+            with self.subTest(kind=kind):
+                self.project = owner / kind
+                self.project.mkdir()
+                self.target = self.project / "host entry"
+                self.oracle = ModelOracle(self, SimpleNamespace(project_root=self.project))
+                self.oracle.watch_pointer(self.target, None)
+                path = self.project / "plan.json"
+                if kind == "retention-transaction":
+                    prepare = """
+import json, sys
+from skills_auditor.lifecycle.engine import Manager
+from skills_auditor.lifecycle.snapshots import inspect_source, materialize
+m = Manager(sys.argv[1])
+d = inspect_source(sys.argv[2])
+materialize(sys.argv[2], m.store_root, d['source_tree_sha256'], d['snapshot_tree_sha256'])
+print(json.dumps({'path': str(m.store_root / d['snapshot_tree_sha256'] / 'tree')}))
+"""
+                    prepared = subprocess.run([os.environ["SKILLS_AUDITOR_PYTHON"], "-I", "-c", prepare, str(self.project), str(self.source)],
+                                              cwd=self.outside, capture_output=True, text=True, timeout=30)
+                    self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
+                    self.oracle.watch_tree(json.loads(prepared.stdout)["path"], normalized_tree(self.candidate_before))
+                    self.after_action()
+                    plan = self.cli("retention", "plan", "collect", "--plan-out", path)
+                    self.oracle.watch_tree(Path(plan["objects"][0]["quarantine_path"]) / "tree", None)
+                else:
+                    child = self.project / "child.json"
+                    plan = self.cli("plan", "install", "--source", self.source, "--target", self.target, "--plan-out", child)
+                    self.remember_plan(plan, source=self.source)
+                    self.oracle.watch_tree(plan["version"]["snapshot"]["path"], None)
+                    if kind == "batch":
+                        plan = self.cli("batch", "plan", child, "--plan-out", path)
+                    else:
+                        path = child
+                die = """
+import json, os, sys
+from skills_auditor.lifecycle.engine import Manager
+from skills_auditor.lifecycle.batch import BatchManager
+from skills_auditor.lifecycle.retention import apply_retention
+m = Manager(sys.argv[1], create=False)
+with open(sys.argv[3]) as handle:
+    p = json.load(handle)
+def checkpoint(name, value):
+    if name == sys.argv[4]: os._exit(73)
+if sys.argv[2] == 'transaction': m.apply(p, approve_plan_id=p['plan_id'], checkpoint=checkpoint)
+elif sys.argv[2] == 'batch': BatchManager(m).apply(p, approve_plan_id=p['plan_id'], checkpoint=checkpoint)
+else: apply_retention(m, p, approve_plan_id=p['plan_id'], checkpoint=checkpoint)
+"""
+                stopped = subprocess.run([os.environ["SKILLS_AUDITOR_PYTHON"], "-I", "-c", die, str(self.project), kind, str(path), boundary],
+                                         cwd=self.outside, capture_output=True, text=True, timeout=30)
+                self.after_action()
+                self.assertEqual(stopped.returncode, 73, stopped.stdout + stopped.stderr)
+                self.assertFalse(self.target.is_symlink())
+                before = self.oracle.check()
+                listing = self.cli("list", "--pending")
+                self.assertEqual(listing["schema_version"], "skills-auditor-lifecycle-pending-list/v1")
+                self.assertEqual(listing["project_root"], str(self.project))
+                entry = next(item for item in listing["pending"] if item["kind"] == kind)
+                inspected = self.emitted(entry["inspection"]["command"])
+                self.assertEqual(inspected["plan"]["plan_id"], plan["plan_id"])
+                self.assertEqual(self.oracle.check(), before)
+                prefix = ("batch",) if kind == "batch" else ("retention",) if kind == "retention-transaction" else ()
+                reference_key = "batch_id" if kind == "batch" else "transaction_id"
+                option = "--batch-id" if kind == "batch" else "--transaction-id"
+                for suffix in ((), (option, "different-default-id")):
+                    failed = self.cli(*prefix, "apply", path, "--approve-plan-id", plan["plan_id"], *suffix, expected=3)
+                    self.assertEqual(failed["details"][reference_key], entry["id"])
+                if kind == "retention-transaction":
+                    failed = self.cli("retention", "plan", "collect", expected=3)
+                    self.assertEqual(failed["details"][reference_key], entry["id"])
+                    text = self.cli("retention", "plan", "collect", expected=3, text=True)
+                    hint = next(line[len("Next (read-only): "):] for line in text.splitlines()
+                                if line.startswith("Next (read-only): "))
+                    self.assertEqual(self.emitted(hint)["transaction_id"], entry["id"])
+                self.assertEqual(self.oracle.check(), before, "Conflicting new IDs must not create substitute intents or receipts")
+                if kind == "batch":
+                    self.expect_effect(plan)
+                    self.cli("batch", "resume", entry["id"], "--approve-plan-id", plan["plan_id"])
+                else:
+                    prefix = ("retention",) if kind == "retention-transaction" else ()
+                    if kind == "retention-transaction":
+                        obj = plan["objects"][0]
+                        self.oracle.watch_tree(self.project / ".skills-auditor-local/lifecycle/store/sha256" / obj["name"] / "tree", None)
+                        self.oracle.watch_tree(Path(obj["quarantine_path"]) / "tree", normalized_tree(self.candidate_before))
+                    else:
+                        self.expect_effect(plan)
+                    self.cli(*prefix, "recover", entry["id"], "--mode", "resume", "--approve-plan-id", plan["plan_id"])
+                self.assertEqual(self.cli("list", "--pending")["pending"], [])
+                if kind == "retention-transaction":
+                    self.assertTrue(Path(plan["objects"][0]["quarantine_path"]).is_dir())
+                    obj = plan["objects"][0]
+                    self.assertEqual(Path(obj["quarantine_path"]).stat().st_ino, obj["identity"][1])
+                    original_tree = self.project / ".skills-auditor-local/lifecycle/store/sha256" / obj["name"] / "tree"
+                    self.assertEqual((Path(obj["quarantine_path"]) / "tree").stat().st_ino, self.snapshot_inodes[original_tree])
+                else:
+                    self.assertEqual((self.target / "payload").read_text(), "H1")
+
+    def test_installed_s02_s03_shared_skill_rollout_inverse_and_inverse_of_inverse_keep_history(self):
+        paths = []
+
+        def planned(operation, *arguments, source=None):
+            path = self.project / ("core-{}.json".format(len(paths)))
+            paths.append(path)
+            plan = self.cli("plan", operation, *arguments, "--plan-out", path)
+            self.remember_plan(plan, source=source)
+            return path, plan
+
+        def apply_core(path, plan):
+            self.cli("apply", path, expected=3)
+            self.expect_effect(plan)
+            return self.cli("apply", path, "--approve-plan-id", plan["plan_id"])
+
+        path, plan = planned("install", "--source", self.source, "--target", self.target, source=self.source)
+        first = apply_core(path, plan)
+        second_target = self.project / "second host"
+        self.oracle.watch_pointer(second_target, None)
+        path, plan = planned("install-retained", "--version-id", first["version_id"], "--target", second_target)
+        second = apply_core(path, plan)
+        self.assertEqual(first["skill_id"], second["skill_id"])
+        self.assertEqual(first["version_id"], second["version_id"])
+        # Candidate edits must not mutate either selected H1 snapshot.
+        (self.source / "payload").write_text("H2")
+        self.candidate_before = tree_state(self.source)
+        self.after_action()
+        saved = []
+        for operation, receipt in (("update", first), ("edit", second)):
+            path, plan = planned(operation, "--installation-id", receipt["installation_id"],
+                                 "--source", self.source, source=self.source)
+            saved.append((path, plan))
+        self.assertEqual(saved[0][1]["version"]["version_id"], saved[1][1]["version"]["version_id"])
+        parent_path = self.project / "rollout.json"
+        parent = self.cli("batch", "plan", *[path for path, _ in saved], "--plan-out", parent_path)
+        self.cli("batch", "apply", parent_path, expected=3)
+        self.expect_effect(parent)
+        forward = self.cli("batch", "apply", parent_path, "--approve-plan-id", parent["plan_id"])
+        ancestors = [forward["batch_id"]]
+
+        def history():
+            before = self.oracle.check()
+            for identifier in ancestors:
+                self.assertIsNotNone(self.cli("batch", "inspect", identifier)["receipt_id"])
+            self.assertEqual(self.cli("retention", "plan", "collect")["objects"], [])
+            after = self.oracle.check()
+            self.assertEqual(after["records"].get("receipt"), before["records"].get("receipt"))
+            self.assertEqual(after["records"].get("batch-receipt"), before["records"].get("batch-receipt"))
+
+        history()
+        for generation, expected_version in ((1, first["version_id"]), (2, saved[0][1]["version"]["version_id"])):
+            path = self.project / ("inverse-{}.json".format(generation))
+            inverse = self.cli("batch", "compensate-plan", ancestors[-1], "--plan-out", path)
+            history()
+            self.cli("batch", "apply", path, expected=3)
+            history()
+            self.expect_effect(inverse)
+            completed = self.cli("batch", "apply", path, "--approve-plan-id", inverse["plan_id"])
+            ancestors.append(completed["batch_id"])
+            for receipt in (first, second):
+                self.oracle.expect_installation(receipt["installation_id"], state="active", authorization="valid",
+                                                version_id=expected_version)
+            history()
+        self.assertEqual(self.cli("inspect", "receipt", first["receipt_id"]), first)
+        self.assertEqual(self.cli("inspect", "receipt", second["receipt_id"]), second)
 
 
 class TestInstalledManagedLifecycle(unittest.TestCase):

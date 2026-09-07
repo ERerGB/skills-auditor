@@ -282,7 +282,8 @@ class Manager:
         legacy = None
         if operation == "migrate":
             legacy = self._legacy(legacy_receipt, source_path, target_path)
-            version["provenance"]["legacy_receipt_id"] = legacy["receipt_id"]
+            if existing_version is None:
+                version["provenance"]["legacy_receipt_id"] = legacy["receipt_id"]
 
         after = copy.deepcopy(before) if before else {
             "schema_version": _SCHEMA + "installation/v1", "installation_id": installation_id,
@@ -338,7 +339,8 @@ class Manager:
                                  details={"path": installation["target"], "expected": expected,
                                           "actual": {key: value for key, value in observation.items() if key != "identity"}})
 
-    def _validate_plan(self, plan, *, physical_paths=True):
+    def _validate_plan(self, plan, *, physical_paths=True, metadata_only=False, resolve_source=True):
+        """Validate exact structure; historical readers never resolve live aliases."""
         required = {"schema_version", "operation", "project_root", "created_at", "installation_id", "skill",
                     "expected_revision", "before", "after", "version", "source", "legacy_receipt", "steps", "plan_id"}
         if not isinstance(plan, dict) or set(plan) != required:
@@ -375,6 +377,20 @@ class Manager:
             _identifier(plan["version"]["version_id"])
             if set(plan["skill"]) != {"skill_id", "name", "created_at"} or set(plan["version"]) != {"version_id", "skill_id", "parent_version_id", "source", "created_at", "snapshot", "provenance"}:
                 raise ValueError("identity fields")
+            origin = plan["version"]
+            if not isinstance(origin["source"], str) or not Path(origin["source"]).is_absolute():
+                raise ValueError("version origin source")
+            if origin["parent_version_id"] is not None and (not isinstance(origin["parent_version_id"], str) or not re.fullmatch(r"[a-f0-9]{64}", origin["parent_version_id"])):
+                raise ValueError("version origin parent")
+            provenance = origin["provenance"]
+            if (type(provenance) is not dict or set(provenance) != {"operation", "legacy_receipt_id"}
+                    or not isinstance(provenance["operation"], str) or provenance["operation"] not in _NEW_VERSION):
+                raise ValueError("version origin provenance")
+            if provenance["operation"] == "migrate":
+                if not isinstance(provenance["legacy_receipt_id"], str) or not provenance["legacy_receipt_id"]:
+                    raise ValueError("migration origin receipt")
+            elif provenance["legacy_receipt_id"] is not None:
+                raise ValueError("non-migration origin receipt")
             if not isinstance(plan["skill"]["name"], str) or not plan["skill"]["name"].strip() or len(plan["skill"]["name"]) > 200:
                 raise ValueError("Skill name")
             for timestamp in (plan["created_at"], plan["skill"]["created_at"], plan["version"]["created_at"], plan["after"]["created_at"]):
@@ -424,25 +440,44 @@ class Manager:
             expected_path = str(self.store_root / snapshot["snapshot_tree_sha256"] / "tree")
             if not re.fullmatch(r"[a-f0-9]{64}", snapshot["snapshot_tree_sha256"]) or snapshot["path"] != expected_path:
                 raise ValueError("snapshot path")
-            if plan["source"] and (_overlap(plan["source"], self.state_root) or str(Path(plan["source"]).resolve()) != plan["source"]):
-                raise ValueError("source path")
+            if plan["source"]:
+                lexical_source = Path(plan["source"])
+                if (_overlap(lexical_source, self.state_root) or ".." in lexical_source.parts
+                        or str(lexical_source) != plan["source"]
+                        or (not metadata_only and resolve_source and str(lexical_source.resolve()) != plan["source"])):
+                    raise ValueError("source path")
             if (operation == "revoke" and plan["steps"] != []) or (operation != "revoke" and not 1 <= len(plan["steps"]) <= 2):
                 raise ValueError("steps")
             existing_version = self.repository.get("version", plan["version"]["version_id"])
+            expected_version_id = digest({"skill_id": plan["skill"]["skill_id"], **{key: value for key, value in snapshot.items() if key != "path"}})
+            if plan["version"]["version_id"] != expected_version_id:
+                raise ValueError("version content identity")
+            same_origin = bool(existing_version and existing_version["data"] == plan["version"])
             if existing_version:
-                if existing_version["data"] != plan["version"]:
-                    raise ValueError("immutable version changed")
+                if any(existing_version["data"].get(key) != plan["version"][key] for key in ("version_id", "skill_id", "snapshot")):
+                    raise ValueError("immutable version content changed")
+                if operation not in _NEW_VERSION and not same_origin:
+                    raise ValueError("immutable retained version origin changed")
             elif operation not in _NEW_VERSION:
                 raise ValueError("retained version missing")
-            else:
-                expected_version_id = digest({"skill_id": plan["skill"]["skill_id"], **{key: value for key, value in snapshot.items() if key != "path"}})
-                if plan["version"]["version_id"] != expected_version_id or plan["version"]["source"] != plan["source"] or plan["version"]["parent_version_id"] != (before["version_id"] if before else None):
+            if operation in _NEW_VERSION and not same_origin:
+                # An independently saved adoption may race first registration.
+                # Its exact origin must still describe this reviewed occurrence;
+                # shared content never authorizes arbitrary metadata changes.
+                if plan["version"]["source"] != plan["source"] or plan["version"]["parent_version_id"] != (before["version_id"] if before else None):
                     raise ValueError("new version identity or lineage")
                 if plan["version"]["provenance"] != {"operation": operation, "legacy_receipt_id": plan["legacy_receipt"]["receipt_id"] if plan["legacy_receipt"] else None}:
                     raise ValueError("version provenance")
             paths = []
             for index, step in enumerate(plan["steps"]):
-                if set(step) != {"path", "parent_identity", "before", "after"} or str(self._target(step["path"], plan["source"], require_parent=physical_paths)) != step["path"]:
+                if set(step) != {"path", "parent_identity", "before", "after"}:
+                    raise ValueError("step path")
+                if metadata_only:
+                    historical_path = Path(step["path"])
+                    if (not historical_path.is_absolute() or ".." in historical_path.parts or str(historical_path) != step["path"]
+                            or _overlap(historical_path, self.state_root) or (plan["source"] and _overlap(historical_path, plan["source"]))):
+                        raise ValueError("historical step path")
+                elif str(self._target(step["path"], plan["source"], require_parent=physical_paths)) != step["path"]:
                     raise ValueError("step path")
                 if len(step["parent_identity"]) != 2 or any(type(part) is not int for part in step["parent_identity"]):
                     raise ValueError("parent identity")
@@ -529,14 +564,11 @@ class Manager:
         def conflicts(other):
             return (other["installation_id"] == plan["installation_id"]
                     or any(_overlap(target, step["path"]) for target in targets for step in other["steps"]))
-        for record in self.repository.list("transaction"):
-            pending = record["data"]
-            if pending["state"] not in {"completed", "compensated"} and conflicts(pending["plan"]):
-                raise LifecycleError("pending_transaction", "An unfinished transaction reserves this installation or target; explicitly inspect and recover it before starting another mutation.",
-                                     details={"transaction_id": pending["transaction_id"]})
         # A parent WAL can reserve children before their core intents exist.
         # Only the internal batch coordinator may exempt its own approved parent
-        # or the explicitly claimed original parent of an inverse plan.
+        # or the explicitly claimed original parent of an inverse plan. Report
+        # that coordinator first even after a child's own WAL exists, so lost
+        # response recovery does not hide the rest of the approved batch.
         for record in self.repository.list("batch"):
             pending = record["data"]
             if pending["state"] in {"completed", "compensated"}:
@@ -546,6 +578,11 @@ class Manager:
             if any(conflicts(child["plan"]) for child in pending["plan"]["children"]):
                 raise LifecycleError("pending_batch", "An unfinished batch reserves this installation or target; explicitly inspect and recover its parent before starting another mutation.",
                                      details={"batch_id": pending["batch_id"]})
+        for record in self.repository.list("transaction"):
+            pending = record["data"]
+            if pending["state"] not in {"completed", "compensated"} and conflicts(pending["plan"]):
+                raise LifecycleError("pending_transaction", "An unfinished transaction reserves this installation or target; explicitly inspect and recover it before starting another mutation.",
+                                     details={"transaction_id": pending["transaction_id"]})
 
     def _revocation_only_since(self, before, current):
         """Prove a completed denial-only lineage without reading filesystem data."""
@@ -591,6 +628,8 @@ class Manager:
                 raise LifecycleError("stale_plan", "Installation state changed after planning. Inspect and compensate owned effects before generating a fresh approval plan.")
         if source and plan["source"]:
             try:
+                if str(Path(plan["source"]).resolve()) != plan["source"]:
+                    raise ValueError("reviewed source path now resolves to another entry")
                 actual = inspect_source(plan["source"])
             except (LifecycleError, OSError, ValueError) as error:
                 raise LifecycleError("stale_plan", "Candidate source is unreadable or changed.", details=_error(error)) from error
@@ -628,7 +667,7 @@ class Manager:
                             expected_revision=existing["revision"] if existing else 0)
 
     def apply(self, plan, *, approve_plan_id, actor="local-operator", transaction_id=None, checkpoint=None):
-        self._validate_plan(plan, physical_paths=False)
+        self._validate_plan(plan, physical_paths=False, resolve_source=False)
         if approve_plan_id != plan["plan_id"]:
             raise LifecycleError("approval_required", "Explicit approval must name this exact saved plan ID.")
         transaction_id = _identifier(transaction_id or uuid.uuid4().hex, "transaction ID")
@@ -638,7 +677,7 @@ class Manager:
 
     def _apply_locked(self, plan, *, approve_plan_id, actor, transaction_id, checkpoint=None, batch_id=None):
         """Internal batch seam; caller holds coordinator and all plan targets."""
-        self._validate_plan(plan, physical_paths=False)
+        self._validate_plan(plan, physical_paths=False, resolve_source=False)
         if approve_plan_id != plan["plan_id"]:
             raise LifecycleError("approval_required", "Explicit approval must name this exact saved plan ID.")
         _identifier(transaction_id)
@@ -856,7 +895,7 @@ class Manager:
         if approve_plan_id != tx["plan"]["plan_id"]:
             raise LifecycleError("approval_required", "Recovery requires explicit approval of the recorded exact plan.")
         self._actor(actor)
-        self._validate_plan(tx["plan"], physical_paths=False)
+        self._validate_plan(tx["plan"], physical_paths=False, resolve_source=False)
         with self._locks(tx["plan"]):
             return self._recover_locked(transaction_id, mode=mode, approve_plan_id=approve_plan_id, actor=actor, checkpoint=checkpoint)
 
@@ -866,7 +905,7 @@ class Manager:
         if mode not in {"resume", "compensate"} or approve_plan_id != tx["plan"]["plan_id"]:
             raise LifecycleError("approval_required", "Explicit recovery must name this exact saved plan ID.")
         self._actor(actor)
-        self._validate_plan(tx["plan"], physical_paths=False)
+        self._validate_plan(tx["plan"], physical_paths=False, resolve_source=False)
         if tx["state"] == "completed":
             if mode != "resume":
                 raise LifecycleError("invalid_recovery", "Completed work needs a new rollback plan, not compensation.")

@@ -414,7 +414,8 @@ def _object(manager, name, created_at):
 def _incomplete(repository, except_id=None):
     for record in repository.list("retention-transaction"):
         if record["id"] != except_id and record["data"].get("state") not in {"completed", "compensated"}:
-            _fail("recovery_required", "Inspect and resume the incomplete retention transaction first.")
+            raise LifecycleError("retention_recovery_required", "Inspect and resume the incomplete retention transaction first.",
+                                 details={"transaction_id": record["id"]})
 
 
 def _build(manager, operation, options, created_at, *, now):

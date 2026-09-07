@@ -12,6 +12,7 @@ import re
 import uuid
 
 from .common import LifecycleError, digest
+from .context import manager_context
 from .status import DEFAULT_MAX_AGE_SECONDS, read_status, unknown_status
 
 
@@ -280,10 +281,13 @@ def select(manager, installation_id, *, policy="strict", refresh=True, override_
     _labels(actor, tool)
     if not _id(installation_id) or not isinstance(policy, str) or policy not in {"strict", "last-known-good"} or type(refresh) is not bool or override_id is not None and not _id(override_id):
         raise _error("invalid_invocation_input", "Invalid installation, selection policy, refresh flag or override ID.", inputs=True)
+    context = manager_context(manager)
     result = {"schema_version": "skills-auditor-invocation/v1", "invocation_id": uuid.uuid4().hex,
+              **context,
               "installation_id": installation_id, "version_id": None, "policy": policy, "decision": "block", "exit_code": 3,
               "snapshot_path": None, "override": None, "reason_codes": [], "assessed_at": _stamp(now),
-              "status": unknown_status(installation_id, now=now, max_age_seconds=max_age_seconds),
+              "status": unknown_status(installation_id, now=now, max_age_seconds=max_age_seconds,
+                                       **context),
               "audit": {"recorded": False, "event_sequence": None},
               "notice": "Selection only, not execution or continuous enforcement. Current approved bytes are not semantic safety; actor/tool labels are not authenticated identities."}
     try:
@@ -313,6 +317,7 @@ def select(manager, installation_id, *, policy="strict", refresh=True, override_
             if proceed:
                 result["snapshot_path"] = manager.repository.get("version", record["data"]["version_id"])["data"]["snapshot"]["path"]
             _audit(manager, result, actor, tool)
+        manager_context(manager)
         return result
     except (LifecycleError, OSError, KeyError, TypeError, ValueError) as error:
         result.update(decision="block", exit_code=3, snapshot_path=None, override=None)
@@ -326,10 +331,12 @@ def select(manager, installation_id, *, policy="strict", refresh=True, override_
         except (LifecycleError, OSError, KeyError, TypeError, ValueError):
             result["audit"] = {"recorded": False, "event_sequence": None}
             result["reason_codes"].append("invocation_audit_failed")
+        manager_context(manager)
         return result
 
 
 def _audit(manager, result, actor, tool):
+    manager_context(manager)
     event = manager.repository.append_event(result["installation_id"], "invocation_selected",
                                             {"invocation_id": result["invocation_id"], "decision": result["decision"],
                                              "version_id": result["version_id"], "override": result["override"],
