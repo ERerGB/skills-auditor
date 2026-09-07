@@ -1,6 +1,7 @@
 """Shipped managed contracts validate real records, not only hand-made examples."""
 
 import copy
+from contextlib import ExitStack
 import json
 import tempfile
 import unittest
@@ -41,7 +42,7 @@ class TestLifecycleSchemas(unittest.TestCase):
             )[:1200]))
 
     def test_real_core_records_and_every_operation_match_shipped_contracts(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as resources:
             root = Path(directory)
             source = root / "candidate"
             source.mkdir()
@@ -49,6 +50,7 @@ class TestLifecycleSchemas(unittest.TestCase):
             hosts = root / "hosts"
             hosts.mkdir()
             manager = Manager(root)
+            resources.callback(manager.repository.close)
             installation_id = None
             first_version = None
             for operation, options in (
@@ -104,12 +106,13 @@ class TestLifecycleSchemas(unittest.TestCase):
             self.check("error", LifecycleError("probe", "bounded failure").to_dict())
 
     def test_malformed_shapes_fail_closed(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as resources:
             root = Path(directory)
             source = root / "candidate"
             source.mkdir()
             (source / "SKILL.md").write_text("# H1\n", encoding="utf-8")
             manager = Manager(root)
+            resources.callback(manager.repository.close)
             plan = manager.plan("install", source=source, target=root / "target")
             receipt = manager.apply(plan, approve_plan_id=plan["plan_id"])
             verification = manager.verify(receipt["installation_id"])
@@ -151,7 +154,7 @@ class TestLifecycleSchemas(unittest.TestCase):
         from skills_auditor.integration import (
             IntegrationSpec, IntegrationTarget, apply_integration_plan, build_integration_plan,
         )
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as resources:
             root = Path(directory)
             source = root / "source" / "alpha"
             source.mkdir(parents=True)
@@ -163,6 +166,7 @@ class TestLifecycleSchemas(unittest.TestCase):
                                    targets=(IntegrationTarget("fixture", root=host),))
             legacy, _ = apply_integration_plan(build_integration_plan(spec))
             manager = Manager(root)
+            resources.callback(manager.repository.close)
             plan = manager.plan("migrate", source=source, target=host / "alpha", legacy_receipt=legacy)
             self.check("plan", plan)
             receipt = manager.apply(plan, approve_plan_id=plan["plan_id"])
@@ -189,12 +193,13 @@ class TestLifecycleSchemas(unittest.TestCase):
             self.check("transaction", compensated)
 
     def test_timezone_qualified_imported_plan_matches_runtime(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as resources:
             root = Path(directory)
             source = root / "candidate"
             source.mkdir()
             (source / "SKILL.md").write_text("# H1\n", encoding="utf-8")
             manager = Manager(root)
+            resources.callback(manager.repository.close)
             plan = manager.plan("install", source=source, target=root / "target")
             for document in (plan, plan["skill"], plan["version"], plan["after"]):
                 document["created_at"] = "2026-09-07T12:00:00.123456+08:00"

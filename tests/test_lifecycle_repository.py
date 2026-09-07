@@ -1,5 +1,6 @@
 """Durable managed-lifecycle records must fail closed, not disappear on failure."""
 
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -300,7 +301,7 @@ class TestLifecycleRepository(unittest.TestCase):
                 self.assertEqual(self.repo._depth, 0)
 
     def _raw(self, sql, parameters=()):
-        with sqlite3.connect(str(self.root / "state.sqlite3")) as connection:
+        with closing(sqlite3.connect(str(self.root / "state.sqlite3"))) as connection, connection:
             connection.execute(sql, parameters)
 
     def test_invalid_json_checksum_and_revision_fail_closed(self):

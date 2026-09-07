@@ -48,11 +48,13 @@ inputs, bound settings reads and preserve the ordinary command's exit policy.
 
 ## Local acceptance
 
-The complete combined implementation passed **707 source tests in 104.967
-seconds**, without failures or skips: 52 more methods than the fresh baseline.
+The complete combined implementation passed **710 source tests** on both local
+Python 3.12.11 (122.929 seconds) and 3.14.7 (149.884 seconds), without failures,
+skips or database ResourceWarnings: 55 more methods than the fresh baseline.
 The additions are 22 producer methods, 14 consumer methods, eight lifecycle
-CLI methods and eight Skill Trace I/O methods. Parameterized subcases are not
-counted as additional methods. A fresh installed wheel outside the checkout
+CLI methods, eight Skill Trace I/O methods and three fixture-ownership methods.
+Parameterized and nested test subcases are not counted as additional methods.
+A fresh installed wheel outside the checkout
 passed **five smoke tests** and **25 installed CLI E2E tests**, including the two
 new installed capture/authorization workflows. The installed test runner copies
 only its tests and the independent stdlib model oracle, not the implementation.
@@ -80,12 +82,41 @@ pre-commit proof readback now rolls back both rows. The native adapter normally
 returns the correct sequence; this is not an ordinary production exploit claim.
 The separately reproduced FIFO hang was a real advisory availability defect.
 
+### Cross-version test admission
+
+The first pushed implementation `d0d2014` passed its local Python 3.12 suite,
+but both remote workflows failed three matrix jobs: Python 3.9/3.10 could not
+reset the test's SQLite authorizer with `None`; Python 3.14 exposed unclosed
+test-owned database connections whose GC warnings contaminated a strict CLI
+stderr assertion. The failed runs are preserved, not described as final passes:
+[first PR CI](https://github.com/ERerGB/skills-auditor/actions/runs/34113860127),
+[first push CI](https://github.com/ERerGB/skills-auditor/actions/runs/34113857773).
+
+The follow-up changes only tests. The authorizer fault switch is restored in
+`finally`, with an added assertion that one actual COMMIT was denied; rollback,
+both-row absence and exact retry assertions remain. Shared/reopened Managers and
+raw SQLite mutation/schema fixtures explicitly close their owned connections
+before deleting temporary directories. SQLite's transaction context is retained
+alongside `closing`, so the corruption fixtures still commit their intended
+changes. No warning filter, GC scheduling workaround, version skip or stderr
+assertion relaxation is used.
+
+The new [ownership regression](../tests/test_lifecycle_fixture_cleanup.py)
+holds native handles and verifies they are closed after 13 existing fixture
+cases, making failures deterministic across Python GC schedules. All 13 failed
+before the fix and passed afterward. An independent reviewer ran the combined
+33-method capture/ownership/CLI selection on both Python 3.9 and 3.14 and also
+verified connection cleanup when selected fixture bodies deliberately fail.
+The two final full local suites above and installed artifact gates were rerun
+after this test-only fix; the wheel remains byte-identical.
+
 ## Coverage, not just the headline
 
 Both runs use branch coverage with the unchanged **90% combined floor** and
 **zero excluded lines**. These counters describe the instrumented source
 process; installed E2E and deliberately killed subprocesses are not folded into
 the percentages. A passing process-death assertion is independent evidence.
+Both final local interpreter runs produced the same statement/branch counters.
 
 | Surface | Statements: baseline → final | Branches: baseline → final |
 | --- | --- | --- |
@@ -106,7 +137,7 @@ No business code, assertions or coverage exclusions were changed to raise it.
 
 Wheel and sdist are built with the normal build frontend; the distribution
 checker verifies metadata and inventory. An additional byte comparison checks
-all 41 public package Python/schema members in the wheel and all 150
+all 41 public package Python/schema members in the wheel and all 151
 non-generated sdist members against this source tree. Runtime state, bytecode,
 Git metadata and `doc/plugin-ecosystem-survey.md` are excluded. Markdown links,
 `git diff --check` and dependency consistency are additional local gates.

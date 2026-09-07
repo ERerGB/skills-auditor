@@ -25,6 +25,7 @@ class LifecycleFixture(unittest.TestCase):
         self.host.mkdir()
         self.target = self.host / "example"
         self.manager = Manager(self.root)
+        self.addCleanup(self.manager.repository.close)
 
     def install(self):
         plan = self.manager.plan("install", source=self.source, target=self.target, name="example")
@@ -367,7 +368,9 @@ class TestLifecycleEngine(LifecycleFixture):
         plan = self.manager.plan("install", source=self.source, target=self.target)
         first = self.manager.apply(plan, approve_plan_id=plan["plan_id"], transaction_id="fixed-key")
         stat = self.target.lstat()
-        again = Manager(self.root).apply(plan, approve_plan_id=plan["plan_id"], transaction_id="fixed-key")
+        restarted = Manager(self.root)
+        self.addCleanup(restarted.repository.close)
+        again = restarted.apply(plan, approve_plan_id=plan["plan_id"], transaction_id="fixed-key")
         self.assertEqual(first, again)
         self.assertEqual(stat.st_ino, self.target.lstat().st_ino)
         other = self.manager.plan("renew", installation_id=first["installation_id"])
@@ -412,6 +415,7 @@ class TestLifecycleEngine(LifecycleFixture):
         self.assertEqual(os.readlink(self.target), os.readlink(other_target))
         self.approve("rename", first["installation_id"], name="new-label")
         restarted = Manager(self.root)
+        self.addCleanup(restarted.repository.close)
         self.assertEqual(restarted.get_installation(first["installation_id"])["name"], "new-label")
         self.assertEqual(restarted.get_installation(first["installation_id"])["skill_id"], first["skill_id"])
 

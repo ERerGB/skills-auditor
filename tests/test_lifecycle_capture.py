@@ -1,6 +1,7 @@
 """Explicit local capture evidence is diagnostic, immutable and atomically proven."""
 
 import copy
+from contextlib import closing
 from datetime import datetime, timezone
 import json
 import os
@@ -185,7 +186,7 @@ class TestLifecycleCapture(unittest.TestCase):
 
     def test_orphan_completion_event_cannot_be_replaced_by_a_new_observation(self):
         self.recorded(evidence_id="orphan")
-        with sqlite3.connect(str(self.manager.repository.path)) as connection:
+        with closing(sqlite3.connect(str(self.manager.repository.path))) as connection, connection:
             connection.execute("DELETE FROM records WHERE kind='capture-evidence' AND id='orphan'")
         with patch("skills_auditor.skill_trace.check_health", side_effect=AssertionError("orphan evidence resampled")):
             with self.assertRaises(LifecycleError) as caught:
@@ -281,9 +282,13 @@ class TestLifecycleCapture(unittest.TestCase):
 
     def test_native_commit_denial_rolls_back_record_and_event_then_same_id_can_retry(self):
         connection = self.manager.repository._connection
+        deny_commits = True
+        denied_commits = 0
 
         def deny_commit(action, argument, _second, _database, _source):
-            if action == sqlite3.SQLITE_TRANSACTION and argument == "COMMIT":
+            nonlocal denied_commits
+            if deny_commits and action == sqlite3.SQLITE_TRANSACTION and argument == "COMMIT":
+                denied_commits += 1
                 return sqlite3.SQLITE_DENY
             return sqlite3.SQLITE_OK
 
@@ -294,7 +299,10 @@ class TestLifecycleCapture(unittest.TestCase):
             self.assertEqual(caught.exception.code, "capture_evidence_write_failed")
             self.assertEqual(caught.exception.to_dict()["details"], {"evidence_id": "commit-failure"})
         finally:
-            connection.set_authorizer(None)
+            # Python before 3.11 does not support None as an authorizer reset.
+            # Leave this fixture-owned callback permissive until normal close.
+            deny_commits = False
+        self.assertEqual(denied_commits, 1)
         self.assertFalse(connection.in_transaction)
         self.assertIsNone(self.manager.repository.get("capture-evidence", "commit-failure"))
         self.assertEqual(self.manager.repository.events("capture-evidence:commit-failure"), [])

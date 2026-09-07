@@ -6,7 +6,7 @@ production has no crash environment variable or implicit test behavior.
 """
 
 import copy
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import json
 import os
 from pathlib import Path
@@ -718,7 +718,7 @@ raise RuntimeError('requested durable boundary was not reached')
                     record = manager.repository.get(mutation, receipt[mutation + "_id"])
                     manager.repository.put(mutation, record["id"], {**record["data"], "installation_id": "foreign"}, expected_revision=record["revision"])
                 elif mutation == "intent-loss":
-                    with sqlite3.connect(str(oracle.database)) as connection:
+                    with closing(sqlite3.connect(str(oracle.database))) as connection, connection:
                         connection.execute("DELETE FROM records WHERE kind='transaction' AND id=?", (receipt["transaction_id"],))
                 else:
                     target = root / "host-a" / "skill"
@@ -747,7 +747,7 @@ raise RuntimeError('requested durable boundary was not reached')
                 else:
                     # The test-only copied fixture deliberately violates its event
                     # history; the model must detect it without production readers.
-                    with sqlite3.connect(str(oracle.database)) as connection:
+                    with closing(sqlite3.connect(str(oracle.database))) as connection, connection:
                         connection.execute("DROP TRIGGER events_no_delete")
                         connection.execute("DELETE FROM events WHERE event_type='transaction_completed'")
                 with self.assertRaises(AssertionError):
