@@ -11,7 +11,8 @@ approval, applies only the reviewed change, and checks the final state.
 [![A chat request to audit one canonical AI skill set passes through Plan, Apply, Receipt, and Verify before reaching Cursor, Claude Code, and Codex workspaces.](docs/media/skills-auditor-chat-workflow.jpg)](https://github.com/ERerGB/skills-auditor)
 
 **Start here:** [Use it in chat](#use-it-in-chat) · [See what it governs](#what-it-governs) ·
-[Install it](#install-and-start) · [Review the trust contract](#trust-contract) ·
+[Install it](#install-and-start) · [Optional Skill Trace](#optional-skill-trace) ·
+[Review the trust contract](#trust-contract) ·
 [Browse the docs](#documentation)
 
 ## Use it in chat
@@ -47,6 +48,7 @@ host does not expose slash commands, ask for the same workflow in natural langua
 | Resolve duplicate or variant skills | Relinks byte-identical definitions; keeps differing variants visible for routing |
 | Bring canonical skills to a workspace | Plans native links for Cursor, Claude Code, Codex, or an explicit custom root |
 | Leave a checkable result | Produces plans, receipts, route traces, verification results, and optional run ledgers |
+| Inspect observed skill access | Optional Skill Trace records local task, tool, and path evidence for later audit |
 
 The default posture is conservative: inspect first, preserve differing definitions, archive before
 replacement, and never infer permission to delete.
@@ -80,6 +82,28 @@ After registration, return to chat and invoke `/skills-auditor`. See
 [installation options](docs/install.md) if you prefer a virtual environment, Git URL install, or
 no-install entry point.
 
+### Optional Skill Trace
+
+Skill Trace records local task, tool, and skill-path events for later audit. These events establish
+observed access; they do not prove that a model followed a skill or produced a correct result.
+Capture is off by default. To use it,
+follow the [plugin installation and trust steps](docs/install.md#optional-skill-trace-plugin):
+install the plugin, review its four handlers in Codex CLI `/hooks`, explicitly enable capture,
+then verify a live task. Installing the plugin alone does not trust its hooks.
+
+| Action | Command |
+| --- | --- |
+| Enable capture | `skills-audit skill-trace enable` |
+| Disable capture and preserve history | `skills-audit skill-trace disable` |
+| Inspect the current setting and health | `skills-audit skill-trace status` |
+| Check capture before skill use | `skills-audit skill-trace check` |
+
+These controls apply only to Skill Trace. Each skill invocation checks capture health before work;
+ordinary auditing remains available when capture is off or unhealthy. A healthy check requires
+recent tool-before and tool-after events from the current task and directory. See
+[purpose and evidence limits](docs/skill-trace.md) or
+[troubleshoot missing capture](docs/troubleshooting.md#skill-trace-captures-no-events).
+
 ## Trust contract
 
 - **Plan first:** generic chat requests inspect and propose; they do not mutate skill definitions or
@@ -107,6 +131,7 @@ If you are operating the product, start with:
 | Need | Read |
 | --- | --- |
 | Install or run a first proof | [Getting started](docs/getting-started.md) · [Installation](docs/install.md) |
+| Set up and operate optional Skill Trace | [Install and trust](docs/install.md#optional-skill-trace-plugin) · [Purpose, controls, and health](docs/skill-trace.md) |
 | Find task-oriented examples | [Examples and recipes](docs/examples.md) |
 | Recover from a failed run | [Troubleshooting](docs/troubleshooting.md) |
 | Review the security boundary | [Security and dependency review](docs/security.md) |

@@ -46,8 +46,12 @@ packages = ["skills_auditor"]
 [tool.hatch.build.targets.sdist]
 include = [
   "/skills_auditor",
+  "/plugins",
+  "/skills",
+  "/.agents/plugins/marketplace.json",
   "/config",
   "/docs",
+  "/doc/sensor-plugin-architecture.md",
   "/e2e_tests",
   "/scripts",
   "/smoke_tests",
