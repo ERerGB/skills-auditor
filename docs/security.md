@@ -38,6 +38,13 @@ fetch Git remotes. Trigger, sensor, trace, plan, receipt, and ledger data remain
 `.skills-auditor-local/` is gitignored. Route traces default to `~/.skills-auditor/traces/`.
 Sensor facts such as file access do not prove semantic skill use.
 
+Optional Skill Trace capture is off by default and requires both explicit enablement and review
+of the plugin's hook definitions in Codex. Its controls affect only this plugin's capture;
+disabling it preserves existing local logs. The adapter stores paths and compact task/tool
+metadata, without raw prompts or full tool inputs and outputs. See the
+[capture boundary](skill-trace.md#intent-and-current-effects) and
+[plugin trust setup](install.md#review-and-trust-this-plugins-hooks).
+
 ## Dependencies and license
 
 The runtime uses the Python standard library. Build tooling is declared in

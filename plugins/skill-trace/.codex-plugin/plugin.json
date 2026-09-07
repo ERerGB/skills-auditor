@@ -1,7 +1,7 @@
 {
   "name": "skill-trace",
-  "version": "0.1.0+codex.20260622115709",
-  "description": "Local skill usage sensor for Skills Auditor.",
+  "version": "0.2.0",
+  "description": "Optional local skill usage sensor for Skills Auditor.",
   "author": {
     "name": "Skills Auditor"
   },
@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "Skill Trace",
     "shortDescription": "Capture local skill access events.",
-    "longDescription": "Skill Trace captures Codex hook payloads as local Skills Auditor sensor events for later path and skill identity alignment.",
+    "longDescription": "Skill Trace optionally captures Codex hook payloads as local Skills Auditor sensor events. Enable capture explicitly and review the plugin hooks in Codex CLI /hooks.",
     "developerName": "Skills Auditor",
     "category": "Productivity",
     "capabilities": [

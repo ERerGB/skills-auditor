@@ -14,6 +14,11 @@ python -m pip install .
 skills-audit --version
 ```
 
+To collect optional runtime evidence in Codex, follow the
+[Skill Trace installation and trust guide](install.md#optional-skill-trace-plugin).
+Capture is off by default. The integration quickstart below works with capture disabled;
+when using the agent skill, its preflight checks capture health before the requested workflow.
+
 ## Quickstart
 
 Assume canonical definitions live under `.agents/skills` and Codex should discover them from the
@@ -65,6 +70,7 @@ Read the [integration contract](integration-contract.md) before automating apply
 ## Next paths
 
 - Installation options: [install.md](install.md)
+- Optional runtime capture, controls, and health: [skill-trace.md](skill-trace.md)
 - Advanced command recipes: [examples.md](examples.md)
 - CI and machine JSON: [ci.md](ci.md)
 - Troubleshooting: [troubleshooting.md](troubleshooting.md)
