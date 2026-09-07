@@ -366,8 +366,8 @@ receipt/transaction/verification references, timestamps, local actor/tool labels
 and bounded pages of events. The default page has at most 50 events; a cursor
 continues the oldest-to-newest history without loading the entire stream.
 Append-only notes can link existing records for an Agent's next investigation.
-They do not fetch arbitrary files or collect prompts, credentials or environment
-variables. Operator-written notes can still contain sensitive text: review them
+They do not fetch arbitrary files or collect prompts, credentials or arbitrary
+environment variables. Operator-written notes can still contain sensitive text: review them
 before export and protect the project state directory.
 
 Remediation requires a new explicitly approved grant and its completed receipt,
@@ -393,6 +393,58 @@ new clean verification, `resolve INCIDENT_ID --verification-id NEW_VERIFICATION_
 records that proof. Alternatively, an explicit `--disposition` with
 `--explanation` records a non-remediation decision. `supersede INCIDENT_ID
 REPLACEMENT_ID --explanation ...` links a related existing incident, not a repair.
+
+### Optional capture evidence
+
+Skill Trace capture health is a separate, advisory dimension. Disabled, stale,
+unverified or erroneous capture does not invalidate a Skill grant; healthy
+capture cannot authorize a blocked Skill, prove semantic Skill use, or attest
+that the host trusts its hooks. Managed commands retain warning-only capture
+preflight: stderr may warn, but the command's JSON stdout and exit status retain
+their existing meaning. No lifecycle command changes capture preferences or
+host hook permissions.
+
+Recording a snapshot and associating it with an incident are explicit steps:
+
+```bash
+skills-audit lifecycle --project-root /project capture-evidence \
+  --evidence-id CAPTURE_ID --log-dir ./task-logs --actor local-reviewer --tool investigation
+skills-audit lifecycle --project-root /project inspect capture-evidence CAPTURE_ID
+skills-audit lifecycle --project-root /project append-note INCIDENT_ID \
+  --text "Recorded optional task-local capture diagnostics; no remediation claimed." \
+  --evidence-ref capture-evidence:CAPTURE_ID --actor local-reviewer --tool investigation
+```
+
+The task working directory, managed project and sensor log root remain distinct.
+Here `./task-logs` is relative to the invoking task's working directory, not
+`/project`. A task B observation stored in project A does not prove that a Skill
+in A was read. The immutable snapshot keeps these contexts, the observation
+time/session, preference source, allowlisted health state and hook timestamps;
+host trust remains `unverified`. It copies neither raw log lines nor tool data,
+prompts, arbitrary error prose or referenced files. Paths and IDs can still be
+private. An identical scoped retry with the same evidence ID returns the original
+observation without resampling; changed requests conflict.
+
+`investigate` adds optional `capture_evidence` snapshots for references in the
+returned event page, deduplicated by evidence ID. Each note accepts at most 20
+references; a page has at most 50 events and 1000 distinct capture records.
+The runtime limits each canonical UTF-8 evidence record to 32 KiB, so the record
+bodies total at most 32,768,000 bytes per page (plus list separators and the
+incident/event wrapper); pretty-printed output can be larger. JSON Schema
+constrains fields and lengths, while the serialized byte ceiling is a runtime
+check rather than a JSON Schema keyword.
+`limits.evidence_refs_per_event` and `limits.capture_evidence_max_records` expose
+these ceilings. Readers validate local ownership, immutable revision and durable
+completion evidence without following the stored paths. Missing or inconsistent
+records fail closed rather than appearing as healthy diagnostics. These are
+output bounds, not a constant-I/O guarantee for historical proof validation.
+Older investigation documents without the additive fields remain schema-valid.
+
+Capture evidence holds no version or snapshot payload reference. Its attachment
+does not resolve the incident or change the incident's existing retention roots;
+explicit incident resolution/expiry remains necessary to release those roots.
+Diagnostic metadata remains readable after a legitimately expired payload is
+collected or purged.
 
 ## Invocation selection and temporary exceptions
 

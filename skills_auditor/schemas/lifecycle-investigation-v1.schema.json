@@ -24,6 +24,11 @@
     "incident": {
       "$ref": "#/$defs/incident"
     },
+    "capture_evidence": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {"$ref": "#/$defs/captureEvidence"}
+    },
     "events": {
       "type": "array",
       "maxItems": 50,
@@ -122,7 +127,8 @@
                               "receipt",
                               "transaction",
                               "verification",
-                              "incident"
+                              "incident",
+                              "capture-evidence"
                             ]
                           },
                           "id": {
@@ -315,7 +321,9 @@
         },
         "note_max_bytes": {
           "const": 4096
-        }
+        },
+        "evidence_refs_per_event": {"const": 20},
+        "capture_evidence_max_records": {"const": 1000}
       }
     },
     "notice": {
@@ -324,6 +332,59 @@
     }
   },
   "$defs": {
+    "captureEvidence": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/lifecycle-capture-evidence-v1.schema.json",
+      "title": "Skills Auditor advisory capture evidence v1",
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "evidence_id", "project_root", "context_verified", "task_cwd", "session_id", "log_root", "observed_at", "preference", "health", "host_trust", "actor", "tool", "completion_event_sequence"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-lifecycle-capture-evidence/v1"},
+        "evidence_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$"},
+        "project_root": {"$ref": "#/$defs/path"}, "context_verified": {"const": true},
+        "task_cwd": {"$ref": "#/$defs/path"}, "log_root": {"$ref": "#/$defs/path"},
+        "session_id": {"anyOf": [{"$ref": "#/$defs/label"}, {"type": "null"}]},
+        "observed_at": {"$ref": "#/$defs/time"},
+        "actor": {"$ref": "#/$defs/label"}, "tool": {"$ref": "#/$defs/label"},
+        "host_trust": {"const": "unverified"}, "completion_event_sequence": {"type": "integer", "minimum": 1},
+        "preference": {
+          "type": "object", "additionalProperties": false, "required": ["enabled", "source", "updated_at"],
+          "properties": {
+            "enabled": {"type": ["boolean", "null"]}, "source": {"enum": ["default", "environment", "file", "unknown"]},
+            "updated_at": {"anyOf": [{"$ref": "#/$defs/time"}, {"type": "null"}]}
+          },
+          "allOf": [
+            {"if": {"properties": {"source": {"const": "unknown"}}}, "then": {"properties": {"enabled": {"type": "null"}}}, "else": {"properties": {"enabled": {"type": "boolean"}}}},
+            {"if": {"properties": {"source": {"const": "file"}}}, "then": {"properties": {"updated_at": {"$ref": "#/$defs/time"}}}, "else": {"properties": {"updated_at": {"type": "null"}}}}
+          ]
+        },
+        "health": {
+          "type": "object", "additionalProperties": false, "required": ["status", "observed_hooks"],
+          "properties": {
+            "status": {"enum": ["disabled", "healthy", "unverified", "stale", "error"]},
+            "observed_hooks": {"type": "object", "additionalProperties": false, "properties": {
+              "SessionStart": {"$ref": "#/$defs/time"}, "PreToolUse": {"$ref": "#/$defs/time"},
+              "PostToolUse": {"$ref": "#/$defs/time"}, "Stop": {"$ref": "#/$defs/time"}
+            }}
+          },
+          "allOf": [
+            {"if": {"properties": {"status": {"enum": ["disabled", "unverified"]}}}, "then": {"properties": {"observed_hooks": {"maxProperties": 0}}}},
+            {"if": {"properties": {"status": {"enum": ["healthy", "stale"]}}}, "then": {"properties": {"observed_hooks": {"minProperties": 1}}}},
+            {"if": {"properties": {"status": {"const": "healthy"}}}, "then": {"properties": {"observed_hooks": {"required": ["PreToolUse", "PostToolUse"]}}}}
+          ]
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"health": {"properties": {"status": {"const": "disabled"}}}}}, "then": {"properties": {"preference": {"properties": {"enabled": {"const": false}}}}}},
+        {"if": {"properties": {"health": {"properties": {"status": {"enum": ["healthy", "unverified", "stale"]}}}}}, "then": {"properties": {"preference": {"properties": {"enabled": {"const": true}}}}}},
+        {"if": {"properties": {"health": {"properties": {"status": {"enum": ["healthy", "stale"]}}}}}, "then": {"properties": {"session_id": {"$ref": "#/$defs/label"}}}}
+      ],
+      "$defs": {
+        "label": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f]*\\S[^\\u0000-\\u001f\\u007f]*$"},
+        "path": {"type": "string", "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
+        "time": {"type": "string", "maxLength": 40, "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$"}
+      }
+    },
     "id": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$"

@@ -4,6 +4,11 @@ This acceptance ledger accompanies the [state model](lifecycle-state-model.md).
 It records executable evidence, not a new feature scope. The model defines the
 requirements; a passing test count alone cannot close this ledger.
 
+This report accepts the historical model-first tree at `8527a83`. Subsequent
+main/PR #21 composition is tracked separately in the
+[trace compatibility verification](lifecycle-trace-verification.md); these
+earlier numbers must not be reused as acceptance for that newer tree.
+
 ## Baseline and regression evidence
 
 The fresh baseline at `c1ea6ff4516905a86c904d2c21c9c67a72242a96` passed 582

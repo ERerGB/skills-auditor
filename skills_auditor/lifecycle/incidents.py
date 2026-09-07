@@ -24,7 +24,7 @@ from .context import action, manager_context
 
 _SCHEMA = "skills-auditor-incident/v1"
 _STATES = {"open", "investigating", "resolved", "superseded"}
-_KINDS = {"skill", "installation", "version", "grant", "receipt", "transaction", "verification", "incident"}
+_KINDS = {"skill", "installation", "version", "grant", "receipt", "transaction", "verification", "incident", "capture-evidence"}
 _EVIDENCE_KEYS = {
     "kind", "link", "path", "state", "status", "source_tree_sha256", "snapshot_tree_sha256", "sha256",
     "version_id", "grant_id", "receipt_id", "transaction_id", "installation_id", "skill_id", "plan_id",
@@ -287,13 +287,18 @@ def record_verification(repository, installation, verification, *, actor="local-
         return references
 
 
-def _references(repository, references):
+def _references(repository, references, project_root):
     if not isinstance(references, list) or len(references) > 20:
         raise _invalid("Evidence references must be at most 20 known record identities.")
     result = []
     for reference in references:
         if (not isinstance(reference, dict) or set(reference) != {"kind", "id"} or not _identifier(reference["kind"]) or reference["kind"] not in _KINDS
-                or not _identifier(reference["id"]) or repository.get(reference["kind"], reference["id"]) is None):
+                or not _identifier(reference["id"])):
+            raise _invalid("Evidence references must identify existing managed records, not arbitrary files.")
+        if reference["kind"] == "capture-evidence":
+            from .capture import get_record
+            get_record(repository, reference["id"], project_root)
+        elif repository.get(reference["kind"], reference["id"]) is None:
             raise _invalid("Evidence references must identify existing managed records, not arbitrary files.")
         if reference not in result:
             result.append(dict(reference))
@@ -422,9 +427,12 @@ def append_note(manager, incident_id, text, *, actor, tool, evidence_refs=None, 
     if not _text(text) or (event_id is not None and not _identifier(event_id)):
         raise _invalid("Notes must contain 1–4096 UTF-8 bytes; retry IDs must be bounded identifiers.")
     repository = manager.repository
+    has_capture = isinstance(evidence_refs, list) and any(isinstance(ref, dict) and ref.get("kind") == "capture-evidence" for ref in evidence_refs)
+    if has_capture:
+        manager_context(manager)
     with repository.atomic():
         record = _record(repository, incident_id)
-        references = _references(repository, [] if evidence_refs is None else evidence_refs)
+        references = _references(repository, [] if evidence_refs is None else evidence_refs, manager.project_root)
         event, created = _append(repository, incident_id, "note", {"text": text, "evidence_refs": references}, actor, tool, event_id or uuid.uuid4().hex)
         if created:
             incident = copy.deepcopy(record["data"])
@@ -432,6 +440,8 @@ def append_note(manager, incident_id, text, *, actor, tool, evidence_refs=None, 
                 incident["state"] = "investigating"
             incident["updated_at"] = event["created_at"]
             repository.put("incident", incident_id, incident, expected_revision=record["revision"])
+        if has_capture:
+            manager_context(manager)
         return event
 
 
@@ -448,17 +458,25 @@ def investigate(manager, incident_id, *, limit=50, after_sequence=None):
     # Repository checks checksums and append-only guards. Project only our
     # documented payload fields, never generic external record contents.
     packet_events = [_event_view(event, incident_id) for event in selected]
+    capture_records = {}
+    for event in packet_events:
+        for reference in event["payload"].get("evidence_refs", []):
+            if reference["kind"] == "capture-evidence" and reference["id"] not in capture_records:
+                from .capture import get_record
+                capture_records[reference["id"]] = get_record(manager.repository, reference["id"], manager.project_root)
     arguments = ["investigate", incident_id]
     if has_more:
         arguments += ["--after-sequence", str(selected[-1]["sequence"]), "--limit", str(limit)]
     context = manager_context(manager)
     return {"schema_version": "skills-auditor-investigation/v1", "incident": {key: incident[key] for key in _FIELDS},
             **context,
-            "events": packet_events, "returned_events": len(selected), "has_more": has_more, "truncated": has_more,
+            "events": packet_events, "capture_evidence": list(capture_records.values()),
+            "returned_events": len(selected), "has_more": has_more, "truncated": has_more,
             "continuation": {"after_sequence": selected[-1]["sequence"], "project_root": context["project_root"],
                              "incident_id": incident_id, "limit": limit} if has_more else None,
             "next_action": action(context["project_root"], arguments)["command"],
-            "limits": {"max_events": limit, "note_max_bytes": 4096},
+            "limits": {"max_events": limit, "note_max_bytes": 4096, "evidence_refs_per_event": 20,
+                       "capture_evidence_max_records": 1000},
             "notice": "Local actor/tool labels are attribution, not authenticated identity. Disposition is not approval; verify and explicitly approve a new plan to restore authorization."}
 
 

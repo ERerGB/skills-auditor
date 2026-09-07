@@ -27,6 +27,7 @@ PACKAGE_FILES = {
     "skills_auditor/state_machine.py",
     "skills_auditor/lifecycle/__init__.py",
     "skills_auditor/lifecycle/batch.py",
+    "skills_auditor/lifecycle/capture.py",
     "skills_auditor/lifecycle/common.py",
     "skills_auditor/lifecycle/context.py",
     "skills_auditor/lifecycle/cli.py",
@@ -48,6 +49,7 @@ PACKAGE_FILES = {
     "skills_auditor/schemas/lifecycle-status-v1.schema.json",
     "skills_auditor/schemas/lifecycle-core-v1.schema.json",
     "skills_auditor/schemas/lifecycle-batch-v1.schema.json",
+    "skills_auditor/schemas/lifecycle-capture-evidence-v1.schema.json",
     "skills_auditor/schemas/lifecycle-incident-v1.schema.json",
     "skills_auditor/schemas/lifecycle-incident-list-v1.schema.json",
     "skills_auditor/schemas/lifecycle-investigation-v1.schema.json",
@@ -116,6 +118,7 @@ def check_sdist(path: Path) -> None:
             prefix + "docs/lifecycle-goal.md",
             prefix + "docs/lifecycle-state-model.md",
             prefix + "docs/lifecycle-model-verification.md",
+            prefix + "docs/lifecycle-trace-alignment.md",
             prefix + "docs/releasing.md",
             prefix + "scripts/check_distribution.py",
             prefix + "scripts/check_markdown.py",
@@ -123,6 +126,7 @@ def check_sdist(path: Path) -> None:
             prefix + "smoke_tests/test_installed_distribution.py",
             prefix + "e2e_tests/test_installed_cli_lifecycle.py",
             prefix + "e2e_tests/test_installed_managed_lifecycle.py",
+            prefix + "e2e_tests/test_installed_lifecycle_trace.py",
             prefix + "tests/test_integration.py",
             prefix + "tests/test_lifecycle_schemas.py",
             prefix + "tests/test_lifecycle_batch_schemas.py",
@@ -131,6 +135,9 @@ def check_sdist(path: Path) -> None:
             prefix + "tests/test_lifecycle_model_context.py",
             prefix + "tests/test_lifecycle_model_sequences.py",
             prefix + "tests/test_lifecycle_model_retention.py",
+            prefix + "tests/test_lifecycle_capture.py",
+            prefix + "tests/test_lifecycle_capture_consumers.py",
+            prefix + "tests/test_lifecycle_trace_cli.py",
         }
     )
     with tarfile.open(path, "r:gz") as archive:

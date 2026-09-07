@@ -155,11 +155,17 @@ def _references(manager):
     def protect(kind, identifier, reason):
         if not isinstance(identifier, str):
             raise ValueError("invalid reference identity")
-        data = get(kind, identifier)
         key = (kind, identifier, reason)
         if key in visited:
             return
         visited.add(key)
+        if kind == "capture-evidence":
+            from .capture import get_record
+            # Committed local diagnostics have no Skill version/payload edge.
+            # Validate the leaf without treating its log path as an object root.
+            get_record(repository, identifier, manager.project_root)
+            return
+        data = get(kind, identifier)
         if kind == "version":
             snapshot = data["snapshot"]
             tree_hash = snapshot["snapshot_tree_sha256"]
@@ -193,7 +199,7 @@ def _references(manager):
             evidence_events[identifier] = events
             for event in events:
                 for reference in event["payload"].get("evidence_refs", []):
-                    if set(reference) != {"kind", "id"} or reference["kind"] not in {"skill", "installation", "version", "receipt", "grant", "verification", "transaction", "incident"}:
+                    if set(reference) != {"kind", "id"} or reference["kind"] not in {"skill", "installation", "version", "receipt", "grant", "verification", "transaction", "incident", "capture-evidence"}:
                         raise ValueError("unknown incident evidence reference")
                     protect(reference["kind"], reference["id"], reason)
         else:

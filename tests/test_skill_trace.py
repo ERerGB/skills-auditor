@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from skills_auditor import skill_trace
 from skills_auditor.cli import main
 from skills_auditor.observability import SensorEvent, write_sensor_event
 from skills_auditor.skill_trace import (
@@ -161,6 +164,157 @@ class TestSkillTrace(unittest.TestCase):
         set_enabled(True)
         with patch("skills_auditor.skill_trace._tail_events", side_effect=PermissionError("denied")):
             self.assertEqual(check_health()["status"], "error")
+
+    def test_settings_size_limit_preserves_regular_symlinks_and_rejects_oversize(self):
+        set_enabled(True)
+        actual = settings_path()
+        payload = actual.read_bytes()
+        actual.write_bytes(payload + b" " * (64 * 1024 - len(payload)))
+        alias = self.root / "settings alias.json"
+        alias.symlink_to(actual)
+        os.environ[SETTINGS_ENV] = str(alias)
+        self.assertTrue(read_settings()["enabled"])
+        self.assertEqual(read_settings()["source"], "file")
+        actual.write_bytes(actual.read_bytes() + b" ")
+        before = actual.read_bytes()
+        with patch.object(skill_trace.os, "read", wraps=os.read) as reader:
+            self.assertEqual(check_health()["status"], "error")
+            reader.assert_not_called()
+        code, output, _ = self.cli("skill-trace", "check", "--format", "json")
+        self.assertEqual((code, json.loads(output)["status"]), (2, "error"))
+        code, _, error = self.cli("audit", "--skills-dir", str(self.root / "empty"))
+        self.assertEqual(code, 0)
+        self.assertEqual(error.count("Skill Trace preflight [error]"), 1)
+        self.assertEqual(actual.read_bytes(), before)
+        self.assertEqual(alias.readlink(), actual)
+
+    def test_sensor_symlink_to_regular_file_preserves_health(self):
+        set_enabled(True)
+        self.pair()
+        path = self.event("SessionStart")
+        actual = path.with_suffix(".saved")
+        path.rename(actual)
+        path.symlink_to(actual)
+        before = actual.read_bytes()
+        self.assertEqual(check_health()["status"], "healthy")
+        self.assertEqual(actual.read_bytes(), before)
+        self.assertEqual(path.readlink(), actual)
+
+    def test_nonregular_descriptor_is_rejected_before_read_and_closed(self):
+        set_enabled(True)
+        path = self.root / "sensor.jsonl"
+        path.write_text('{"ok":1}\n')
+        real_open, real_close = os.open, os.close
+        for loader in (read_settings, lambda: list(_tail_events(path))):
+            with self.subTest(loader=loader):
+                opened = []
+
+                def track_open(*args, **kwargs):
+                    descriptor = real_open(*args, **kwargs)
+                    opened.append(descriptor)
+                    return descriptor
+
+                # Inspect the opened object, not an earlier path stat: the path
+                # may have been replaced between the caller's check and open.
+                with patch.object(skill_trace.os, "open", side_effect=track_open) as opener, \
+                        patch.object(skill_trace.os, "fstat", return_value=SimpleNamespace(st_mode=stat.S_IFIFO, st_size=0)), \
+                        patch.object(skill_trace.os, "read") as reader, \
+                        patch.object(skill_trace.os, "close", wraps=real_close) as closer:
+                    with self.assertRaisesRegex(ValueError, "regular file"):
+                        loader()
+                    opener.assert_called_once()
+                    if hasattr(os, "O_NONBLOCK"):
+                        self.assertTrue(opener.call_args.args[1] & os.O_NONBLOCK)
+                    reader.assert_not_called()
+                self.assertEqual(len(opened), 1)
+                closer.assert_called_once_with(opened[0])
+                with self.assertRaises(OSError):
+                    os.fstat(opened[0])
+
+    def test_regular_read_closes_descriptor_on_fstat_seek_and_read_failures(self):
+        set_enabled(True)
+        path = self.root / "sensor.jsonl"
+        path.write_bytes(b"x" * (skill_trace.MAX_TAIL_BYTES + 1))
+        real_open, real_close = os.open, os.close
+        for kind, loader in (("settings", read_settings), ("sensor", lambda: list(_tail_events(path)))):
+            faults = [("fstat", OSError), ("read", OSError), ("read", ValueError), ("read", FileNotFoundError)]
+            if kind == "sensor":
+                faults.append(("lseek", OSError))
+            for operation, error_type in faults:
+                with self.subTest(kind=kind, operation=operation, error_type=error_type):
+                    opened = []
+
+                    def track_open(*args, **kwargs):
+                        descriptor = real_open(*args, **kwargs)
+                        opened.append(descriptor)
+                        return descriptor
+
+                    with patch.object(skill_trace.os, "open", side_effect=track_open), \
+                            patch.object(skill_trace.os, operation, side_effect=error_type("injected read failure")), \
+                            patch.object(skill_trace.os, "close", wraps=real_close) as closer:
+                        with self.assertRaisesRegex(error_type, "injected read failure"):
+                            loader()
+                    self.assertEqual(len(opened), 1)
+                    closer.assert_called_once_with(opened[0])
+                    with self.assertRaises(OSError):
+                        os.fstat(opened[0])
+
+    def test_open_failure_does_not_close_an_unowned_descriptor(self):
+        for loader in (read_settings, lambda: list(_tail_events(self.root / "sensor.jsonl"))):
+            with self.subTest(loader=loader), \
+                    patch.object(skill_trace.os, "open", side_effect=PermissionError("injected open failure")), \
+                    patch.object(skill_trace.os, "close") as closer:
+                with self.assertRaisesRegex(PermissionError, "injected open failure"):
+                    loader()
+                closer.assert_not_called()
+
+    def test_settings_growth_after_fstat_is_rejected_with_bounded_read(self):
+        set_enabled(True)
+        path = settings_path()
+        payload = path.read_bytes()
+        path.write_bytes(payload + b" " * (64 * 1024 + 1 - len(payload)))
+        metadata = SimpleNamespace(st_mode=stat.S_IFREG, st_size=64 * 1024)
+        with patch.object(skill_trace.os, "fstat", return_value=metadata), \
+                patch.object(skill_trace.os, "read", wraps=os.read) as reader:
+            self.assertEqual(check_health()["status"], "error")
+            reader.assert_called_once()
+            self.assertEqual(reader.call_args.args[1], 64 * 1024 + 1)
+
+    def test_tail_read_and_partial_line_discard_are_bounded(self):
+        path = self.root / "sensor.jsonl"
+        path.write_bytes(b"x" * (skill_trace.MAX_TAIL_BYTES + 1))
+        with patch.object(skill_trace.os, "read", wraps=os.read) as reader:
+            self.assertEqual(list(_tail_events(path)), [])
+            reader.assert_called_once()
+            self.assertEqual(reader.call_args.args[1], skill_trace.MAX_TAIL_BYTES)
+
+    def test_short_regular_reads_are_completed_and_descriptor_closed_on_success(self):
+        set_enabled(True)
+        path = self.root / "sensor.jsonl"
+        path.write_bytes(b'{"ok":1}\n{"ok":2}\n')
+        real_read, real_open, real_close = os.read, os.open, os.close
+        for kind, loader in (("settings", read_settings), ("sensor", lambda: list(_tail_events(path)))):
+            with self.subTest(kind=kind):
+                opened = []
+
+                def track_open(*args, **kwargs):
+                    descriptor = real_open(*args, **kwargs)
+                    opened.append(descriptor)
+                    return descriptor
+
+                with patch.object(skill_trace.os, "open", side_effect=track_open), \
+                        patch.object(skill_trace.os, "read", side_effect=lambda fd, size: real_read(fd, min(size, 7))) as reader, \
+                        patch.object(skill_trace.os, "close", wraps=real_close) as closer:
+                    result = loader()
+                    self.assertGreater(reader.call_count, 1)
+                if kind == "settings":
+                    self.assertTrue(result["enabled"])
+                else:
+                    self.assertEqual(result, [{"ok": 1}, {"ok": 2}])
+                self.assertEqual(len(opened), 1)
+                closer.assert_called_once_with(opened[0])
+                with self.assertRaises(OSError):
+                    os.fstat(opened[0])
 
     def test_preflight_does_not_change_json_output_or_command_exit_code(self):
         args = ("integrate", "--source", str(self.root / "missing"), "--target", "codex", "--format", "json")

@@ -4,6 +4,9 @@ This is the model-first refinement of [the executable goal](lifecycle-goal.md),
 not another feature roadmap. It governs Issue #19 / PR #20 and the existing
 status, incident and snapshot slices. Legacy integration v1 remains unchanged.
 The [operator guide](managed-lifecycle.md) describes the public commands.
+The subsequent [Skill Trace alignment](lifecycle-trace-alignment.md) adds an
+orthogonal advisory capture dimension after PR #21; it does not relax the
+frozen core authorization or transaction policy below.
 
 ## Alignment brief and frozen scope
 
@@ -51,6 +54,7 @@ rewrites.
 | Incident | Signature bound to installation/grant/version/failure | Opening evidence and append-only observations/notes/resolution proof | Open, investigating, resolved or superseded projection |
 | Invocation override | Exact approved exception binding | Plan, approval receipt and use/revocation events | Active, expired or revoked; cannot waive integrity or authorization |
 | Retention transaction | Transaction ID and exact retention plan | Selected objects, identities, references and approval | Per-object move/delete progress; quarantine location and retention policy |
+| Capture evidence | Explicit evidence ID, owned by the selected project | Bounded task/log context, health observation and completion event | No authority over grants; current capture may differ from this historical observation |
 
 The dependency graph is not a list of independent features:
 
@@ -65,6 +69,8 @@ verification -> installation + grant + version + receipt + transaction
              -> durable denial / latest observation -> status -> invocation
              -> incident -> investigation and evidence-backed resolution
 retention -> installation / receipt / incident / pending intent / override roots
+task cwd + session + log root -> optional capture health (not hook trust)
+explicit capture evidence -> incident note / investigation (not authorization)
 ```
 
 ### Version identity is not an adoption occurrence
@@ -212,6 +218,8 @@ healthy; actual restoration still requires intact retained bytes.
 | I10 reference safety | Active/retained/in-flight/evidence roots cannot be purged; expiration is explicit and separate | Shared versions, nested inverse batches, incidents, overrides, collect/restore/purge |
 | I11 independent evidence | Missing, malformed, contradictory or interrupted evidence cannot imply usable approval; freshness is not silently extended | Core evidence readers, status and invocation; schema/runtime agreement |
 | I12 compatibility | Legacy v1 keeps its meaning; new contracts, commands and packages remain aligned | Historical fixtures, machine schemas, docs, source/wheel/sdist and installed E2E |
+| I13 separate capture authority | Capture preference, host hook trust, sensor health and Skill authorization cannot substitute for each other; warnings preserve command stdout/exit policy | Every lifecycle CLI entry, status, invocation, capture records and incident consumers |
+| I14 observation ownership | Capture evidence binds task cwd/session/log root separately from the managed project; explicit persistence is atomic and idempotent, no arbitrary file ingestion or payload roots | Capture reader/writer, incident references, investigation schema and retention |
 
 ### Discovery and action context contract
 
@@ -290,6 +298,7 @@ refresh status, grant approval, or mutate evidence while reading assertions.
 | S06 lost response | Real process exit after generated core/batch/retention WAL; new planning attempts and default/different-ID apply cannot supersede old work and rejected conflicts expose its reference; inspect then exact approved recovery | I02, I05, I07–I08 |
 | S07 retention | Update/uninstall -> explicit evidence expiry/policy -> collect -> restore -> collect -> purge; active, shared, pending, unresolved incident and override roots; foreign occupancy and partial deletion | I05–I07, I09–I11 |
 | S08 negative admission | No/wrong approval, altered content, conflicting shared identity, overlapping target, stale revision, unknown ID, malformed proof, reused ID/different plan | I01–I02, I05, I09, I11–I12 |
+| S09 optional capture | Disabled / healthy / stale / unverified / error alongside valid / denied Skill state; outside task cwd; explicit evidence -> exact retry -> incident note -> investigation -> retention; malformed or incomplete evidence negative controls | I02–I05, I08, I10–I14 |
 
 Crash points include core prepared/staged, step intent/staged/effect/completed,
 before-commit/committed; batch prepared, child-started, child durable points,

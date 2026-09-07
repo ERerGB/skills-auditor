@@ -36,6 +36,10 @@ def _consumers(commands):
         leaves.append(parser)
         return parser
 
+    capture = leaf(commands, "capture-evidence", help="Explicitly record bounded Skill Trace health; never grants Skill or host trust.")
+    capture.add_argument("--evidence-id", help="Optional idempotency key for the same scoped diagnostic request.")
+    capture.add_argument("--log-dir", help="Sensor root; relative paths are resolved from the actual task cwd, not the managed project.")
+    _attribution(capture, tool=True, actor="local-observer")
     listing = leaf(commands, "incidents", help="List validated incident records, including historical dispositions.")
     listing.add_argument("--installation-id")
     listing.add_argument("--state", choices=("open", "investigating", "resolved", "superseded"))
@@ -157,7 +161,7 @@ def configure(parser):
     for command in (status, flight):
         command.add_argument("--max-age-seconds", type=int, default=300)
     inspect = commands.add_parser("inspect", help="Read historical records, not proof of current health.")
-    inspect.add_argument("kind", choices=("transaction", "installation", "skill", "receipt", "version", "grant", "verification", "incident"))
+    inspect.add_argument("kind", choices=("transaction", "installation", "skill", "receipt", "version", "grant", "verification", "incident", "capture-evidence"))
     inspect.add_argument("identifier")
     recover = commands.add_parser("recover", help="Inspect by default; recovery requires exact plan approval.")
     recover.add_argument("transaction_id")
@@ -272,6 +276,10 @@ def _save_result(manager, result, arguments):
 
 def _consumer_execute(manager, arguments):
     command = arguments.lifecycle_command
+    if command == "capture-evidence":
+        from .capture import record
+        return record(manager, evidence_id=arguments.evidence_id, log_dir=arguments.log_dir,
+                      actor=arguments.actor, tool=arguments.tool), 0
     if command == "incidents":
         return {"schema_version": "skills-auditor-lifecycle-incident-list/v1", "incidents": incidents.list_incidents(manager, installation_id=arguments.installation_id, state=arguments.state)}, 0
     if command == "investigate":
@@ -374,6 +382,9 @@ def execute(arguments):
         if command == "inspect":
             if arguments.kind == "incident":
                 return incidents.get_incident(manager, arguments.identifier), 0
+            if arguments.kind == "capture-evidence":
+                from .capture import get
+                return get(manager, arguments.identifier), 0
             record = manager.repository.get(arguments.kind, arguments.identifier)
             if record is None:
                 raise LifecycleError("record_missing", "Requested historical record does not exist.")
@@ -458,6 +469,10 @@ def main(argv=None, *, prog="skills-audit lifecycle"):
         arguments = configure(_Parser(prog=prog)).parse_args(argv)
         output_format = arguments.format
         project_root = arguments.project_root
+        # The root CLI dispatches here early. Own this advisory once, after
+        # successful parsing, for both that route and direct library callers.
+        from skills_auditor.skill_trace import preflight_warning
+        preflight_warning(getattr(arguments, "log_dir", None))
         payload, code = execute(arguments)
     except LifecycleError as error:
         payload, code = error.to_dict(), _exit_code(error)

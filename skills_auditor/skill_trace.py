@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,7 @@ from typing import Optional
 ENABLE_ENV = "SKILLS_AUDITOR_SKILL_TRACE"
 SETTINGS_ENV = "SKILLS_AUDITOR_SKILL_TRACE_CONFIG"
 MAX_TAIL_BYTES = 256 * 1024
+MAX_SETTINGS_BYTES = 64 * 1024
 MAX_AGE_SECONDS = 300
 REPAIR_HINT = (
     "In Codex CLI /hooks, review and enable only skill-trace@skills-auditor-local hooks; "
@@ -42,10 +44,10 @@ def read_settings() -> dict:
             raise ValueError(f"{ENABLE_ENV} must be 0 or 1")
         result.update(enabled=override == "1", source="environment")
         return result
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
+    data = _read_regular_file(path, MAX_SETTINGS_BYTES)
+    if data is None:
         return result
+    value = json.loads(data.decode("utf-8"))
     if not isinstance(value, dict) or value.get("schema_version") != 1 or type(value.get("enabled")) is not bool:
         raise ValueError(f"Invalid Skill Trace settings: {path}")
     updated_at = value.get("updated_at", "")
@@ -86,16 +88,47 @@ def log_root(cwd: Path, value: Optional[str] = None) -> Path:
     return root if root.is_absolute() else cwd / root
 
 
+def _read_regular_file(path: Path, limit: int, *, tail: bool = False) -> Optional[bytes]:
+    """Bound diagnostic input without waiting for a FIFO writer.
+
+    Validate the opened descriptor, allowing symlinks to regular files. The
+    byte bound is not a deadline for a slow or unresponsive filesystem.
+    """
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+    except FileNotFoundError:
+        return None
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(f"Skill Trace input must be a regular file: {path}")
+        if not tail and metadata.st_size > limit:
+            raise ValueError(f"Skill Trace input exceeds {limit} bytes: {path}")
+        start = max(0, metadata.st_size - limit) if tail else 0
+        if start:
+            os.lseek(descriptor, start, os.SEEK_SET)
+        # An extra settings byte detects growth after fstat. Sensor reads and
+        # partial-line discard share one bound, even during concurrent appends.
+        remaining = limit if tail else limit + 1
+        chunks = []
+        while remaining:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
+        if not tail and len(data) > limit:
+            raise ValueError(f"Skill Trace input exceeds {limit} bytes: {path}")
+        return data.partition(b"\n")[2] if start else data
+    finally:
+        os.close(descriptor)
+
+
 def _tail_events(path: Path):
     """Bound preflight cost; incomplete appends are ignored, never repaired here."""
-    try:
-        with path.open("rb") as stream:
-            size = stream.seek(0, 2)
-            stream.seek(max(0, size - MAX_TAIL_BYTES))
-            if size > MAX_TAIL_BYTES:
-                stream.readline()
-            data = stream.read(MAX_TAIL_BYTES)
-    except FileNotFoundError:
+    data = _read_regular_file(path, MAX_TAIL_BYTES, tail=True)
+    if data is None:
         return
     for line in data.splitlines():
         try:
