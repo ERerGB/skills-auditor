@@ -57,7 +57,8 @@ The default posture is conservative: inspect first, preserve differing definitio
 replacement, and never infer permission to delete.
 
 Choose [managed lifecycle](docs/managed-lifecycle.md) when you need version selection, durable
-revocation and recovery. Existing live-link integrations remain compatible; migration is explicit.
+revocation and recoverable transactions. Existing live-link integrations remain compatible;
+migration is explicit.
 
 ## Install and start
 
@@ -97,17 +98,26 @@ follow the [plugin installation and trust steps](docs/install.md#optional-skill-
 install the plugin, review its four handlers in Codex CLI `/hooks`, explicitly enable capture,
 then verify a live task. Installing the plugin alone does not trust its hooks.
 
-| Action | Command |
-| --- | --- |
-| Enable capture | `skills-audit skill-trace enable` |
-| Disable capture and preserve history | `skills-audit skill-trace disable` |
-| Inspect the current setting and health | `skills-audit skill-trace status` |
-| Check capture before skill use | `skills-audit skill-trace check` |
+Four separate boundaries govern Skill use and optional observation:
 
-These controls apply only to Skill Trace. Each skill invocation checks capture health before work;
-ordinary auditing remains available when capture is off or unhealthy. A healthy check requires
-recent tool-before and tool-after events from the current task and directory. See
-[purpose and evidence limits](docs/skill-trace.md) or
+| Boundary | Who controls it and what it means |
+| --- | --- |
+| Skill approval and integrity | Reviewed plans and managed verification decide whether the selected version may proceed |
+| Host hook trust | The host authorizes hook execution; Skills Auditor does not certify or change that permission |
+| Capture preference | Your setting enables optional observation, not Skill approval |
+| Capture health | Recent matching task-local events provide advisory evidence, not permission |
+
+**Healthy capture cannot authorize a blocked Skill; unhealthy capture does not revoke a valid
+grant.** Automatic CLI capture checks only warn on stderr and preserve the requested command's
+stdout and exit status. Ordinary auditing remains available when capture is off or unhealthy.
+
+Use `skills-audit skill-trace status` or `check` for a read-only observation, and `enable` or
+`disable` to change only capture preference; disabling preserves history. To preserve diagnostics
+for an Agent's later investigation, explicitly record `lifecycle capture-evidence`, attach its ID
+with `append-note`, and retrieve it with `investigate`. The
+[complete workflow](docs/skill-trace.md#explicit-managed-diagnostic-records) stores bounded health
+metadata, not raw logs or prompts; a health check alone creates no managed diagnostic history.
+See [purpose and evidence limits](docs/skill-trace.md) or
 [troubleshoot missing capture](docs/troubleshooting.md#skill-trace-captures-no-events).
 
 ## Trust contract
@@ -126,8 +136,15 @@ recent tool-before and tool-after events from the current task and directory. Se
 
 Legacy receipt verification is a current observation: restoring the reviewed bytes can make the
 same receipt valid again. Managed installations instead retain invalidation and require new
-explicit approval. Their `[OK]`, `[WARN]` and `[BLOCK]` status separates approval from evidence age;
-use-time preflight is an integration point, not an automatic badge or enforcement in every host.
+explicit approval. For example, approved snapshot H1 stays active while you edit candidate H2;
+only reviewing and approving its plan can activate H2. If active H1 fails verification, restoring
+its bytes does not renew approval, and no older version is selected automatically. Recovery needs
+a new reviewed transaction. See [authorization and recovery](docs/managed-lifecycle.md).
+
+Managed `[OK]`, `[WARN]` and `[BLOCK]` status separates approval from evidence age. Use-time
+preflight is an integration point, not an automatic badge or enforcement in every host. Managed
+transactions record recoverable steps; they do not make filesystem changes and database writes
+globally atomic.
 
 Built-in project and global targets are available for Cursor, Claude Code, and Codex. Explicit
 paths cover other host layouts.
@@ -146,6 +163,7 @@ If you are operating the product, start with:
 | --- | --- |
 | Install or run a first proof | [Getting started](docs/getting-started.md) · [Installation](docs/install.md) |
 | Set up and operate optional Skill Trace | [Install and trust](docs/install.md#optional-skill-trace-plugin) · [Purpose, controls, and health](docs/skill-trace.md) |
+| Preserve capture diagnostics for investigation | [Record, attach, and investigate](docs/skill-trace.md#explicit-managed-diagnostic-records) |
 | Find task-oriented examples | [Examples and recipes](docs/examples.md) |
 | Recover from a failed run | [Troubleshooting](docs/troubleshooting.md) |
 | Review the security boundary | [Security and dependency review](docs/security.md) |
