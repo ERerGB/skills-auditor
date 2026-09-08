@@ -73,6 +73,17 @@ def checked_run(command: Sequence[str], *, cwd: Path, environment: dict[str, str
         raise SystemExit(result.returncode)
 
 
+def copy_suite(layer: str, destination: Path) -> None:
+    """Share only the independent stdlib test oracle with installed E2E.
+
+    The implementation package is not copied: imports still come exclusively
+    from the installed wheel, never from the source checkout.
+    """
+    shutil.copytree(LAYERS[layer], destination)
+    if layer == "e2e":
+        shutil.copyfile(PROJECT_ROOT / "tests" / "lifecycle_model.py", destination / "lifecycle_model.py")
+
+
 def run_layer(layer: str, wheel: Path) -> None:
     source_suite = LAYERS[layer]
     if not source_suite.is_dir():
@@ -82,7 +93,7 @@ def run_layer(layer: str, wheel: Path) -> None:
         root = Path(base)
         environment_root = root / "venv"
         suite = root / "suite"
-        shutil.copytree(source_suite, suite)
+        copy_suite(layer, suite)
         venv.EnvBuilder(with_pip=True, clear=True).create(environment_root)
         python, cli, pip = environment_paths(environment_root)
 

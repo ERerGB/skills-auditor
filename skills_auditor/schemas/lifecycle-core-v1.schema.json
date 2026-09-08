@@ -1,0 +1,395 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/lifecycle-core-v1.schema.json",
+  "title": "Managed Skill lifecycle core v1 contracts",
+  "description": "Core record bundle; preflight references the shipped sibling status schema. Select a named $defs contract for one record type. Shapes do not replace runtime checksums, cross-record binding, filesystem preconditions or explicit approval.",
+  "oneOf": [
+    {"$ref": "#/$defs/plan"}, {"$ref": "#/$defs/receipt"},
+    {"$ref": "#/$defs/transaction"}, {"$ref": "#/$defs/installation"},
+    {"$ref": "#/$defs/skill"}, {"$ref": "#/$defs/version"},
+    {"$ref": "#/$defs/grant"}, {"$ref": "#/$defs/verification"},
+    {"$ref": "#/$defs/error"}, {"$ref": "#/$defs/event"},
+    {"$ref": "#/$defs/snapshot_descriptor"},
+    {"$ref": "#/$defs/snapshot_manifest"}, {"$ref": "#/$defs/snapshot_stage"},
+    {"$ref": "#/$defs/verification_run"}, {"$ref": "#/$defs/installation_list"},
+    {"$ref": "#/$defs/preflight"}, {"$ref": "#/$defs/pending_list"}
+  ],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$"},
+    "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "path": {"type": "string", "pattern": "^/.+"},
+    "time": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$"},
+    "label": {"type": "string", "minLength": 1, "maxLength": 512},
+    "name": {"type": "string", "minLength": 1, "maxLength": 200},
+    "reasons": {"type": "array", "items": {"$ref": "#/$defs/label"}, "uniqueItems": true},
+    "operation": {"enum": ["install", "install-retained", "update", "edit", "move", "rename", "disable", "enable", "archive", "uninstall", "renew", "revoke", "rollback", "migrate"]},
+    "lifecycle_state": {"enum": ["active", "disabled", "archived", "uninstalled"]},
+    "authorization": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "grant_id", "reason_codes"],
+      "properties": {
+        "state": {"enum": ["valid", "invalidated", "revoked", "unknown"]},
+        "grant_id": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+        "reason_codes": {"$ref": "#/$defs/reasons"}
+      },
+      "if": {"properties": {"state": {"const": "valid"}}},
+      "then": {"properties": {"grant_id": {"$ref": "#/$defs/id"}, "reason_codes": {"maxItems": 0}}}
+    },
+    "approval": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "requires_reapproval", "reason_codes"],
+      "properties": {
+        "state": {"enum": ["valid", "invalidated", "revoked", "unknown"]},
+        "requires_reapproval": {"type": "boolean"},
+        "reason_codes": {"$ref": "#/$defs/reasons"}
+      },
+      "if": {"properties": {"state": {"const": "valid"}}},
+      "then": {"properties": {"requires_reapproval": {"const": false}, "reason_codes": {"maxItems": 0}}},
+      "else": {"properties": {"requires_reapproval": {"const": true}}}
+    },
+    "skill": {
+      "type": "object", "additionalProperties": false,
+      "required": ["skill_id", "name", "created_at"],
+      "properties": {
+        "skill_id": {"$ref": "#/$defs/id"}, "name": {"$ref": "#/$defs/name"},
+        "created_at": {"$ref": "#/$defs/time"}
+      }
+    },
+    "snapshot_descriptor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_tree_sha256", "snapshot_tree_sha256", "normalization", "path"],
+      "properties": {
+        "source_tree_sha256": {"$ref": "#/$defs/hash"},
+        "snapshot_tree_sha256": {"$ref": "#/$defs/hash"},
+        "normalization": {"const": "remove-write-bits/v1"}, "path": {"$ref": "#/$defs/path"}
+      }
+    },
+    "snapshot_manifest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "snapshot_tree_sha256", "normalization"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-snapshot/v1"},
+        "snapshot_tree_sha256": {"$ref": "#/$defs/hash"},
+        "normalization": {"const": "remove-write-bits/v1"}
+      }
+    },
+    "snapshot_stage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "source_tree_sha256", "snapshot_tree_sha256", "normalization"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-snapshot-stage/v1"},
+        "source_tree_sha256": {"$ref": "#/$defs/hash"},
+        "snapshot_tree_sha256": {"$ref": "#/$defs/hash"},
+        "normalization": {"const": "remove-write-bits/v1"}
+      }
+    },
+    "version": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version_id", "skill_id", "parent_version_id", "source", "created_at", "snapshot", "provenance"],
+      "properties": {
+        "version_id": {"$ref": "#/$defs/hash"}, "skill_id": {"$ref": "#/$defs/id"},
+        "parent_version_id": {"anyOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
+        "source": {"$ref": "#/$defs/path"}, "created_at": {"$ref": "#/$defs/time"},
+        "snapshot": {"$ref": "#/$defs/snapshot_descriptor"},
+        "provenance": {
+          "type": "object", "additionalProperties": false,
+          "required": ["operation", "legacy_receipt_id"],
+          "properties": {
+            "operation": {"enum": ["install", "update", "edit", "migrate"]},
+            "legacy_receipt_id": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]}
+          }
+        }
+      }
+    },
+    "installation_properties": {
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": "skills-auditor-lifecycle-installation/v1"},
+        "installation_id": {"$ref": "#/$defs/id"}, "skill_id": {"$ref": "#/$defs/id"},
+        "version_id": {"$ref": "#/$defs/hash"}, "target": {"$ref": "#/$defs/path"},
+        "name": {"$ref": "#/$defs/name"}, "state": {"$ref": "#/$defs/lifecycle_state"},
+        "created_at": {"$ref": "#/$defs/time"}, "updated_at": {"$ref": "#/$defs/time"},
+        "generation": {"type": "integer", "minimum": 1},
+        "receipt_id": {"$ref": "#/$defs/id"}, "last_transaction_id": {"$ref": "#/$defs/id"}
+      }
+    },
+    "installation": {
+      "allOf": [{"$ref": "#/$defs/installation_properties"}],
+      "type": "object", "unevaluatedProperties": false,
+      "required": ["schema_version", "installation_id", "skill_id", "version_id", "target", "name", "state", "authorization", "created_at", "updated_at", "generation", "receipt_id", "last_transaction_id"],
+      "properties": {"authorization": {"$ref": "#/$defs/authorization"}}
+    },
+    "planned_installation": {
+      "allOf": [{"$ref": "#/$defs/installation_properties"}],
+      "type": "object", "unevaluatedProperties": false,
+      "required": ["schema_version", "installation_id", "skill_id", "version_id", "target", "name", "state", "authorization", "created_at"],
+      "properties": {
+        "authorization": {
+          "type": "object", "additionalProperties": false,
+          "required": ["state", "grant_id"],
+          "properties": {"state": {"const": "unknown"}, "grant_id": {"type": "null"}}
+        }
+      }
+    },
+    "missing_entry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind"], "properties": {"kind": {"const": "missing"}}
+    },
+    "link_entry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "link"],
+      "properties": {"kind": {"const": "symlink"}, "link": {"type": "string", "minLength": 1}}
+    },
+    "observed_link": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "link", "identity"],
+      "properties": {
+        "kind": {"const": "symlink"}, "link": {"type": "string", "minLength": 1},
+        "identity": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 0}}
+      }
+    },
+    "step_properties": {
+      "type": "object", "required": ["path", "parent_identity", "before", "after"],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "parent_identity": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer", "minimum": 0}},
+        "before": {"oneOf": [{"$ref": "#/$defs/missing_entry"}, {"$ref": "#/$defs/observed_link"}]},
+        "after": {"oneOf": [{"$ref": "#/$defs/missing_entry"}, {"$ref": "#/$defs/link_entry"}]}
+      }
+    },
+    "plan_step": {"allOf": [{"$ref": "#/$defs/step_properties"}], "unevaluatedProperties": false},
+    "transaction_step": {
+      "allOf": [{"$ref": "#/$defs/step_properties"}], "unevaluatedProperties": false,
+      "required": ["state"],
+      "properties": {"state": {"enum": ["pending", "intent", "completed", "compensating", "compensated"]}}
+    },
+    "operation_steps": {
+      "if": {"properties": {"operation": {"const": "revoke"}}},
+      "then": {"properties": {"steps": {"maxItems": 0}}},
+      "else": {"properties": {"steps": {"minItems": 1, "maxItems": 2}}}
+    },
+    "plan": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "plan_id", "operation", "project_root", "created_at", "installation_id", "skill", "expected_revision", "before", "after", "version", "source", "legacy_receipt", "steps"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-lifecycle-plan/v1"},
+        "plan_id": {"$ref": "#/$defs/hash"}, "operation": {"$ref": "#/$defs/operation"},
+        "project_root": {"$ref": "#/$defs/path"}, "created_at": {"$ref": "#/$defs/time"},
+        "installation_id": {"$ref": "#/$defs/id"}, "skill": {"$ref": "#/$defs/skill"},
+        "expected_revision": {"type": "integer", "minimum": 0},
+        "before": {"anyOf": [{"$ref": "#/$defs/installation"}, {"type": "null"}]},
+        "after": {"oneOf": [{"$ref": "#/$defs/installation"}, {"$ref": "#/$defs/planned_installation"}]},
+        "version": {"$ref": "#/$defs/version"},
+        "source": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
+        "legacy_receipt": {"anyOf": [{"type": "object", "required": ["schema_version", "receipt_id", "results"], "properties": {"schema_version": {"const": "skills-auditor-receipt/v1"}}}, {"type": "null"}]},
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/plan_step"}}
+      },
+      "allOf": [
+        {"$ref": "#/$defs/operation_steps"},
+        {
+          "if": {"properties": {"operation": {"enum": ["install", "update", "edit", "migrate"]}}},
+          "then": {"properties": {"source": {"$ref": "#/$defs/path"}}},
+          "else": {"properties": {"source": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"operation": {"const": "migrate"}}},
+          "then": {"properties": {"legacy_receipt": {"type": "object"}}},
+          "else": {"properties": {"legacy_receipt": {"type": "null"}}}
+        }
+      ],
+      "if": {"properties": {"operation": {"enum": ["install", "install-retained", "migrate"]}}},
+      "then": {"properties": {"before": {"type": "null"}, "expected_revision": {"const": 0}, "after": {"$ref": "#/$defs/planned_installation"}}},
+      "else": {"properties": {"before": {"$ref": "#/$defs/installation"}, "expected_revision": {"minimum": 1}, "after": {"$ref": "#/$defs/installation"}}}
+    },
+    "grant": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "grant_id", "installation_id", "skill_id", "version_id", "plan_id", "target", "installation_generation", "transaction_id", "actor", "approved_at"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-lifecycle-grant/v1"},
+        "grant_id": {"$ref": "#/$defs/id"}, "installation_id": {"$ref": "#/$defs/id"},
+        "skill_id": {"$ref": "#/$defs/id"}, "version_id": {"$ref": "#/$defs/hash"},
+        "plan_id": {"$ref": "#/$defs/hash"}, "target": {"$ref": "#/$defs/path"},
+        "installation_generation": {"type": "integer", "minimum": 1},
+        "transaction_id": {"$ref": "#/$defs/id"}, "actor": {"$ref": "#/$defs/name"},
+        "approved_at": {"$ref": "#/$defs/time"}
+      }
+    },
+    "receipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "receipt_id", "transaction_id", "plan_id", "operation", "installation_id", "skill_id", "version_id", "grant_id", "status", "completed_at", "steps"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-lifecycle-receipt/v1"},
+        "receipt_id": {"$ref": "#/$defs/id"}, "transaction_id": {"$ref": "#/$defs/id"},
+        "plan_id": {"$ref": "#/$defs/hash"}, "operation": {"$ref": "#/$defs/operation"},
+        "installation_id": {"$ref": "#/$defs/id"}, "skill_id": {"$ref": "#/$defs/id"},
+        "version_id": {"$ref": "#/$defs/hash"}, "grant_id": {"$ref": "#/$defs/id"},
+        "status": {"const": "completed"}, "completed_at": {"$ref": "#/$defs/time"},
+        "steps": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/transaction_step"}], "properties": {"state": {"const": "completed"}}}}
+      },
+      "allOf": [{"$ref": "#/$defs/operation_steps"}]
+    },
+    "failure": {
+      "type": "object", "additionalProperties": false, "required": ["code", "message"],
+      "properties": {"code": {"$ref": "#/$defs/label"}, "message": {"type": "string"}, "details": {"type": "object"}}
+    },
+    "transaction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "transaction_id", "plan", "actor", "approved_plan_id", "created_at", "state", "grant_id", "steps", "error", "recovery_errors", "receipt_id", "snapshot_ready"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-lifecycle-transaction/v1"},
+        "transaction_id": {"$ref": "#/$defs/id"}, "plan": {"$ref": "#/$defs/plan"},
+        "actor": {"$ref": "#/$defs/name"}, "approved_plan_id": {"$ref": "#/$defs/hash"},
+        "created_at": {"$ref": "#/$defs/time"},
+        "state": {"enum": ["prepared", "applying", "recovery_needed", "completed", "compensating", "compensated"]},
+        "grant_id": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+        "steps": {"type": "array", "maxItems": 2, "items": {"$ref": "#/$defs/transaction_step"}},
+        "error": {"anyOf": [{"$ref": "#/$defs/failure"}, {"type": "null"}]},
+        "recovery_errors": {"type": "array", "items": {"$ref": "#/$defs/failure"}},
+        "receipt_id": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+        "snapshot_ready": {"type": "boolean"}
+      },
+      "if": {"properties": {"state": {"const": "completed"}}},
+      "then": {"properties": {"receipt_id": {"$ref": "#/$defs/id"}, "snapshot_ready": {"const": true}, "steps": {"items": {"properties": {"state": {"const": "completed"}}}}}}
+    },
+    "check": {
+      "type": "object", "required": ["code", "valid"],
+      "properties": {
+        "code": {"$ref": "#/$defs/label"}, "valid": {"type": "boolean"},
+        "error": {"$ref": "#/$defs/failure"}, "path": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    },
+    "verification": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "verification_id", "installation_id", "skill_id", "version_id", "receipt_id", "grant_id", "observed_at", "integrity", "approval", "valid"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-lifecycle-verification/v1"},
+        "verification_id": {"$ref": "#/$defs/id"}, "installation_id": {"$ref": "#/$defs/id"},
+        "skill_id": {"$ref": "#/$defs/id"}, "version_id": {"$ref": "#/$defs/hash"},
+        "receipt_id": {"$ref": "#/$defs/id"}, "grant_id": {"$ref": "#/$defs/id"},
+        "observed_at": {"$ref": "#/$defs/time"}, "valid": {"type": "boolean"},
+        "approval": {"$ref": "#/$defs/approval"},
+        "integrity": {
+          "type": "object", "additionalProperties": false, "required": ["valid", "checks"],
+          "properties": {"valid": {"type": "boolean"}, "checks": {
+            "type": "array", "minItems": 5, "items": {"$ref": "#/$defs/check"},
+            "allOf": [
+              {"contains": {"properties": {"code": {"const": "snapshot_tree"}}, "required": ["code"]}, "minContains": 1, "maxContains": 1},
+              {"contains": {"properties": {"code": {"const": "target_link"}}, "required": ["code"]}, "minContains": 1, "maxContains": 1},
+              {"contains": {"properties": {"code": {"const": "receipt_record"}}, "required": ["code"]}, "minContains": 1, "maxContains": 1},
+              {"contains": {"properties": {"code": {"const": "transaction_record"}}, "required": ["code"]}, "minContains": 1, "maxContains": 1},
+              {"contains": {"properties": {"code": {"const": "grant_binding"}}, "required": ["code"]}, "minContains": 1, "maxContains": 1}
+            ]
+          }},
+          "if": {"properties": {"valid": {"const": true}}},
+          "then": {"properties": {"checks": {"items": {"properties": {"valid": {"const": true}}}}}},
+          "else": {"properties": {"checks": {"contains": {"properties": {"valid": {"const": false}}, "required": ["valid"]}}}}
+        }
+      },
+      "if": {"properties": {"valid": {"const": true}}},
+      "then": {"properties": {"approval": {"properties": {"state": {"const": "valid"}}}, "integrity": {"properties": {"valid": {"const": true}}}}},
+      "else": {"properties": {"approval": {"properties": {"state": {"enum": ["invalidated", "revoked", "unknown"]}}}}}
+    },
+    "error": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "code", "message", "details"],
+      "properties": {
+        "project_root": {"type": ["string", "null"], "pattern": "^/", "maxLength": 4096},
+        "context_verified": {"type": "boolean"},
+        "schema_version": {"const": "skills-auditor-lifecycle-error/v1"},
+        "code": {"$ref": "#/$defs/label"}, "message": {"type": "string"}, "details": {"type": "object"}
+      }
+    },
+    "verification_run": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "verification_id", "started_at", "grant_id", "version_id", "generation"],
+      "properties": {
+        "state": {"enum": ["in_progress", "completed"]},
+        "verification_id": {"$ref": "#/$defs/id"},
+        "grant_id": {"$ref": "#/$defs/id"}, "version_id": {"$ref": "#/$defs/hash"},
+        "generation": {"type": "integer", "minimum": 1},
+        "started_at": {"$ref": "#/$defs/time"}, "completed_at": {"$ref": "#/$defs/time"}
+      },
+      "if": {"properties": {"state": {"const": "completed"}}},
+      "then": {"required": ["completed_at"]},
+      "else": {"properties": {"completed_at": false}}
+    },
+    "pending_reference": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "id"],
+      "properties": {
+        "kind": {"enum": ["batch", "transaction", "retention-transaction"]},
+        "id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f/\\\\]+$"}
+      }
+    },
+    "pending_cursor": {
+      "type": "object", "additionalProperties": false, "required": ["after_kind", "after_id"],
+      "properties": {
+        "after_kind": {"enum": ["batch", "transaction", "retention-transaction"]},
+        "after_id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f/\\\\]+$"}
+      }
+    },
+    "pending_list": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "project_root", "context_verified", "pending", "limit", "has_more", "continuation"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-lifecycle-pending-list/v1"},
+        "project_root": {"type": "string", "pattern": "^/", "maxLength": 4096}, "context_verified": {"const": true},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100}, "has_more": {"type": "boolean"},
+        "continuation": {"anyOf": [{"$ref": "#/$defs/pending_cursor"}, {"type": "null"}]},
+        "pending": {"type": "array", "maxItems": 100, "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "id", "state", "plan_id", "parents", "children", "inspection"],
+          "properties": {
+            "kind": {"enum": ["batch", "transaction", "retention-transaction"]},
+            "id": {"type": "string", "minLength": 1, "maxLength": 200},
+            "state": {"enum": ["prepared", "applying", "recovery_needed", "compensating"]},
+            "plan_id": {"$ref": "#/$defs/hash"},
+            "parents": {"type": "array", "maxItems": 100, "uniqueItems": true, "items": {"$ref": "#/$defs/pending_reference"}},
+            "children": {"type": "array", "maxItems": 50, "uniqueItems": true, "items": {"$ref": "#/$defs/pending_reference"}},
+            "inspection": {"type": "object", "additionalProperties": false, "required": ["command", "argv", "required_inputs"],
+              "properties": {
+                "command": {"type": "string", "minLength": 1, "maxLength": 20000},
+                "argv": {"type": "array", "minItems": 6, "maxItems": 54, "items": {"type": "string", "maxLength": 4096}},
+                "required_inputs": {"type": "array", "maxItems": 0}
+              }}
+          }
+        }}
+      },
+      "if": {"properties": {"has_more": {"const": true}}},
+      "then": {"properties": {"pending": {"minItems": 1}, "continuation": {"$ref": "#/$defs/pending_cursor"}}},
+      "else": {"properties": {"continuation": {"type": "null"}}}
+    },
+    "installation_list": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "installations"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-lifecycle-list/v1"},
+        "installations": {"type": "array", "items": {"$ref": "#/$defs/installation"}}
+      }
+    },
+    "preflight": {
+      "type": "object", "additionalProperties": false,
+      "required": ["decision", "exit_code", "status"],
+      "properties": {
+        "decision": {"enum": ["proceed", "warn", "block"]},
+        "exit_code": {"enum": [0, 3, 4]},
+        "status": {"$ref": "lifecycle-status-v1.schema.json"}
+      },
+      "allOf": [
+        {"if": {"properties": {"decision": {"const": "proceed"}}}, "then": {"properties": {"exit_code": {"const": 0}, "status": {"properties": {"severity": {"const": "ok"}}}}}},
+        {"if": {"properties": {"decision": {"const": "warn"}}}, "then": {"properties": {"exit_code": {"const": 4}, "status": {"properties": {"severity": {"const": "warning"}}}}}},
+        {"if": {"properties": {"decision": {"const": "block"}}}, "then": {"properties": {"exit_code": {"const": 3}, "status": {"properties": {"severity": {"const": "error"}}}}}}
+      ]
+    },
+    "event": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sequence", "stream", "event_type", "payload", "actor", "tool", "created_at"],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 1}, "stream": {"$ref": "#/$defs/label"},
+        "event_type": {"$ref": "#/$defs/label"}, "payload": {"type": "object"},
+        "actor": {"$ref": "#/$defs/label"}, "tool": {"$ref": "#/$defs/label"},
+        "created_at": {"$ref": "#/$defs/time"}
+      }
+    }
+  }
+}

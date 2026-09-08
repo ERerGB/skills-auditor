@@ -44,8 +44,8 @@ remain visible in Codex CLI `/hooks`. No synthetic probe is written by the check
 ## Independent preflight
 
 Every auditor/trace skill invocation starts with `skills-audit skill-trace check`, independently
-of Codex dispatching this plugin's hooks. Ordinary auditor CLI commands also run this check when
-a current Codex task id is available. An optional collector cannot reliably diagnose its own
+of Codex dispatching this plugin's hooks. Ordinary and managed lifecycle CLI commands also run
+this check once when a current Codex task id is available. An optional collector cannot reliably diagnose its own
 absence from inside a hook that the host refuses to execute.
 
 | State | Meaning and action |
@@ -63,10 +63,51 @@ future timestamps, and `--dry-run` output cannot make it healthy. Session-start 
 are included in JSON diagnostics but are not required to be recent during an active turn.
 This checks the main tool capture path, not coverage of every tool or every lifecycle handler.
 
+Diagnostic inputs must be regular files; symlinks to regular files remain supported. Inputs are
+opened non-blocking where supported and checked through their opened descriptor, so a FIFO cannot
+wait for a writer during preflight. Settings are limited to 64 KiB, and partial sensor-line discard
+stays within the tail limit. Rejected inputs produce `error`, not healthy capture. These are byte
+and file-type limits, not a wall-clock deadline for a slow or unresponsive filesystem.
+
 Explicit `check` exits `0` for disabled/healthy, `1` for unverified/stale, and `2` for read/config
 errors. `status` exits `0` for diagnostic states and `2` for errors. Automatic CLI preflight warns
 on stderr without changing the requested command's stdout or exit status. The agent reports a
 capture gap once and continues ordinary work; it never interprets the gap as zero skill usage.
+
+## Explicit managed diagnostic records
+
+Managed lifecycle integrity/grants, host hook trust, capture preference and capture health
+are independent authorities. Healthy capture never grants a Skill permission; missing or failed
+capture never revokes one. None of these lifecycle commands edits capture settings, host trust,
+or the host-wide hook feature flag.
+
+To preserve a bounded observation in an existing managed project, then attach it explicitly:
+
+```bash
+skills-audit lifecycle --project-root /managed-project capture-evidence \
+  --evidence-id CAPTURE_ID --log-dir ./task-logs --actor local-reviewer --tool investigation
+skills-audit lifecycle --project-root /managed-project inspect capture-evidence CAPTURE_ID
+skills-audit lifecycle --project-root /managed-project append-note INCIDENT_ID \
+  --text "Optional capture diagnostic; no Skill-use or remediation claim." \
+  --evidence-ref capture-evidence:CAPTURE_ID --actor local-reviewer --tool investigation
+skills-audit lifecycle --project-root /managed-project investigate INCIDENT_ID
+```
+
+Relative log paths remain task-cwd-relative even when `--project-root` names another project.
+Records distinguish the managed owner, task cwd/session and log root; another task's healthy
+capture does not prove a particular managed Skill was read. The snapshot contains allowlisted
+health/preference metadata and observed hook timestamps, not raw sensor lines, tool inputs or
+outputs, prompts, arbitrary errors or files named by the evidence. Host trust is always
+`unverified`. Paths and identifiers remain potentially private.
+
+The record and completion event commit together. An evidence ID is an exact scoped retry key:
+repeating the same request returns its original observation without resampling. Readers reject
+missing, malformed, foreign or inconsistent records and never dereference their stored paths.
+Investigation returns deduplicated `capture_evidence` for only its current page (at most 50 events,
+20 references per note and 1000 capture records), not an unbounded sensor-log search. See the
+[managed investigation contract](managed-lifecycle.md#optional-capture-evidence) for retention,
+schema compatibility and output limits. Capture records are diagnostic leaves with no payload
+retention roots and cannot substitute for verification or resolve an incident as remediated.
 
 ## Installation and controls
 

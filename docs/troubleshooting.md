@@ -113,3 +113,42 @@ Ordinary auditing remains available while you investigate. See the
 
 For `integrate`, `apply`, and `verify`, `0` means command success, `2` means invalid input, and `3`
 means a contract failure. Legacy primitives retain their documented command-specific gates.
+
+## A managed installation is warning, blocked or unknown
+
+Use the owning project and stable installation ID, not a guessed current name:
+
+```bash
+skills-audit lifecycle --project-root /project status INSTALLATION_ID --format json
+skills-audit lifecycle --project-root /project preflight INSTALLATION_ID --format json
+```
+
+Status reads cached evidence; preflight verifies afresh by default. A warning about stale
+evidence is not a new approval. Missing state is reported as unknown, never silently initialized
+as a healthy installation. Managed exit `4` means stale plan or stale-evidence warning; `3`
+means blocked or failed. These codes do not replace legacy command-specific exits.
+
+| Evidence | Next investigation |
+| --- | --- |
+| `snapshot_tree` | Compare the expected/actual hash and read error; do not edit the stored snapshot in place |
+| `target_link` | Inspect expected versus actual target state; preserve another writer's entry |
+| `receipt_record`, `transaction_record`, `grant_binding` | Inspect the linked historical records and current authorization; do not fabricate a replacement receipt |
+| `verification_incomplete`, `status_invalid`, `never_verified` | Inspect prior verification/transaction evidence, then obtain a fresh completed verification |
+| `lock_contended` | Identify the cooperating writer; do not delete its lock file to force a retry |
+
+Restoring a managed target's bytes alone does not restore approval. Renew or roll back only
+through a newly reviewed, explicitly approved plan. If the target is foreign, resolve its
+ownership before planning a change; automatic overwriting is intentionally refused.
+
+## A managed transaction stopped partway through
+
+```bash
+skills-audit lifecycle --project-root /project inspect transaction TRANSACTION_ID
+skills-audit lifecycle --project-root /project recover TRANSACTION_ID --mode inspect
+```
+
+Inspect individual steps and current paths before choosing an explicitly approved resume or
+compensation. Earlier pointer changes may already have occurred without a completed receipt.
+An old successful receipt is historical evidence, not a shortcut around a later invalidation
+or changed installation generation. A completed transaction requires a new inverse plan rather
+than unfinished-transaction compensation. See [managed recovery](managed-lifecycle.md#failure-and-recovery).

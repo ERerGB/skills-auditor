@@ -564,6 +564,8 @@ def repair_skill_metadata(
             new_text += "\n"
 
     if apply:
+        from skills_auditor.lifecycle.guards import assert_legacy_mutation_allowed
+        assert_legacy_mutation_allowed([skill_md])
         skill_md.write_text(new_text, encoding="utf-8")
 
     return [
@@ -589,7 +591,12 @@ def collect_metadata_repair_actions(
     apply: bool = False,
 ) -> List[MetadataRepairAction]:
     actions: List[MetadataRepairAction] = []
-    for skill_md in iter_visible_skill_mds(skills_dir):
+    skill_paths = iter_visible_skill_mds(skills_dir)
+    if apply:
+        from skills_auditor.lifecycle.guards import assert_legacy_mutation_allowed
+        planned = [action for path in skill_paths for action in repair_skill_metadata(path, platform=platform, apply=False)]
+        assert_legacy_mutation_allowed([Path(action.skill_md_path) for action in planned if action.action == "repair"])
+    for skill_md in skill_paths:
         actions.extend(repair_skill_metadata(skill_md, platform=platform, apply=apply))
     return actions
 
@@ -1148,6 +1155,11 @@ def route_pipeline(
 
 def apply_route(actions: List[DedupAction], skills_dir: Path) -> int:
     """Execute route actions. Returns count of applied changes."""
+    from skills_auditor.lifecycle.guards import assert_legacy_mutation_allowed
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    mutation_paths = [Path(action.duplicate_path) for action in actions if action.action in {"relink", "archive", "delete"}]
+    mutation_paths.extend(Path(action.duplicate_path).with_name(Path(action.duplicate_path).name + ".archived-" + timestamp) for action in actions if action.action == "archive")
+    assert_legacy_mutation_allowed(mutation_paths)
     applied = 0
     for a in actions:
         dup = Path(a.duplicate_path)
@@ -1159,8 +1171,7 @@ def apply_route(actions: List[DedupAction], skills_dir: Path) -> int:
             dup.symlink_to(rel)
             applied += 1
         elif a.action == "archive":
-            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-            archive_name = f"{dup.name}.archived-{ts}"
+            archive_name = f"{dup.name}.archived-{timestamp}"
             dup.rename(dup.parent / archive_name)
             applied += 1
         elif a.action == "delete":
@@ -1294,6 +1305,8 @@ def plan_dedup(
 
 def apply_dedup(actions: List[DedupAction]) -> int:
     """Execute planned relink actions. Returns count of applied symlinks."""
+    from skills_auditor.lifecycle.guards import assert_legacy_mutation_allowed
+    assert_legacy_mutation_allowed([Path(action.duplicate_path) for action in actions if action.action == "relink"])
     applied = 0
     for a in actions:
         if a.action != "relink":
@@ -1929,9 +1942,13 @@ def plan_sync(
 
 def apply_actions(skills_dir: Path, actions: List[SyncAction]) -> None:
     actionable = {"create_link", "replace_link", "archive_and_link"}
+    from skills_auditor.lifecycle.guards import assert_legacy_mutation_allowed
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    mutation_paths = [skills_dir / action.name for action in actions if action.action in actionable]
+    mutation_paths.extend(skills_dir / (action.name + ".archived-" + timestamp) for action in actions if action.action == "archive_and_link")
+    assert_legacy_mutation_allowed(mutation_paths)
     if any(action.action in actionable for action in actions):
         skills_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     for action in actions:
         entry = skills_dir / action.name
         target = Path(action.expected_target).expanduser().resolve()
@@ -2139,6 +2156,8 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
+    from skills_auditor.lifecycle.cli import register as register_lifecycle
+    register_lifecycle(sub)
 
     p_integrate = sub.add_parser(
         "integrate",
@@ -2751,9 +2770,15 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     return parser
 
 
-def main(prog: Optional[str] = None) -> int:
+def _main(prog: Optional[str] = None) -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "lifecycle":
+        from skills_auditor.lifecycle.cli import main as lifecycle_main
+        return lifecycle_main(sys.argv[2:], prog=(prog or "skills-audit") + " lifecycle")
     parser = build_parser(prog=prog)
     args = parser.parse_args()
+    if args.command in {"metadata-repair", "sync", "sync-discover", "dedup", "route"} and args.apply:
+        from skills_auditor.lifecycle.guards import assert_legacy_mutation_allowed
+        assert_legacy_mutation_allowed(resolve_skills_dirs(args.skills_dirs))
 
     from skills_auditor.skill_trace import preflight_warning, run_control
 
@@ -3555,6 +3580,15 @@ def main(prog: Optional[str] = None) -> int:
 
     parser.print_help()
     return 1
+
+
+def main(prog: Optional[str] = None) -> int:
+    from skills_auditor.lifecycle.guards import ManagedBoundaryError
+    try:
+        return _main(prog=prog)
+    except ManagedBoundaryError as error:
+        print("error [{}]: {}".format(error.code, error), file=sys.stderr)
+        return error.exit_code
 
 
 if __name__ == "__main__":

@@ -1,0 +1,725 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/lifecycle-investigation-v1.schema.json",
+  "title": "Skills Auditor bounded investigation packet v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "incident",
+    "events",
+    "returned_events",
+    "has_more",
+    "truncated",
+    "continuation",
+    "next_action",
+    "limits",
+    "notice"
+  ],
+  "properties": {
+    "project_root": {"type": "string", "pattern": "^/", "maxLength": 4096},
+    "context_verified": {"type": "boolean"},
+    "schema_version": {
+      "const": "skills-auditor-investigation/v1"
+    },
+    "incident": {
+      "$ref": "#/$defs/incident"
+    },
+    "capture_evidence": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {"$ref": "#/$defs/captureEvidence"}
+    },
+    "events": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": [
+          "sequence",
+          "event_type",
+          "actor",
+          "tool",
+          "created_at",
+          "payload"
+        ],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "event_type": {
+            "enum": [
+              "observation",
+              "note",
+              "resolved",
+              "superseded"
+            ]
+          },
+          "actor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "tool": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payload": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "event_type": {
+                  "const": "note"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "event_id",
+                    "incident_id",
+                    "text",
+                    "evidence_refs"
+                  ],
+                  "properties": {
+                    "event_id": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "incident_id": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "pattern": "\\S"
+                    },
+                    "evidence_refs": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "id"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "enum": [
+                              "skill",
+                              "installation",
+                              "version",
+                              "grant",
+                              "receipt",
+                              "transaction",
+                              "verification",
+                              "incident",
+                              "capture-evidence"
+                            ]
+                          },
+                          "id": {
+                            "$ref": "#/$defs/id"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "event_type": {
+                  "const": "observation"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "event_id",
+                    "incident_id",
+                    "verification_id",
+                    "observed_at",
+                    "checks_failed",
+                    "reason_codes"
+                  ],
+                  "properties": {
+                    "event_id": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "incident_id": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "verification_id": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "observed_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "maxLength": 64
+                    },
+                    "checks_failed": {
+                      "type": "boolean"
+                    },
+                    "reason_codes": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "$ref": "#/$defs/id"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "event_type": {
+                  "const": "resolved"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "event_id",
+                    "incident_id",
+                    "resolution"
+                  ],
+                  "properties": {
+                    "event_id": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "incident_id": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "resolution": {
+                      "$ref": "#/$defs/resolution"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "event_type": {
+                  "const": "superseded"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "event_id",
+                    "incident_id",
+                    "superseded_by",
+                    "explanation"
+                  ],
+                  "properties": {
+                    "event_id": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "incident_id": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "superseded_by": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "explanation": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "pattern": "\\S"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "returned_events": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 50
+    },
+    "has_more": {
+      "type": "boolean"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "continuation": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "after_sequence"
+          ],
+          "properties": {
+            "after_sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "project_root": {"type": "string", "pattern": "^/", "maxLength": 4096},
+            "incident_id": {"$ref": "#/$defs/id"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "next_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "limits": {
+      "type": "object",
+      "required": [
+        "max_events",
+        "note_max_bytes"
+      ],
+      "properties": {
+        "max_events": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "note_max_bytes": {
+          "const": 4096
+        },
+        "evidence_refs_per_event": {"const": 20},
+        "capture_evidence_max_records": {"const": 1000}
+      }
+    },
+    "notice": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "captureEvidence": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/lifecycle-capture-evidence-v1.schema.json",
+      "title": "Skills Auditor advisory capture evidence v1",
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "evidence_id", "project_root", "context_verified", "task_cwd", "session_id", "log_root", "observed_at", "preference", "health", "host_trust", "actor", "tool", "completion_event_sequence"],
+      "properties": {
+        "schema_version": {"const": "skills-auditor-lifecycle-capture-evidence/v1"},
+        "evidence_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$"},
+        "project_root": {"$ref": "#/$defs/path"}, "context_verified": {"const": true},
+        "task_cwd": {"$ref": "#/$defs/path"}, "log_root": {"$ref": "#/$defs/path"},
+        "session_id": {"anyOf": [{"$ref": "#/$defs/label"}, {"type": "null"}]},
+        "observed_at": {"$ref": "#/$defs/time"},
+        "actor": {"$ref": "#/$defs/label"}, "tool": {"$ref": "#/$defs/label"},
+        "host_trust": {"const": "unverified"}, "completion_event_sequence": {"type": "integer", "minimum": 1},
+        "preference": {
+          "type": "object", "additionalProperties": false, "required": ["enabled", "source", "updated_at"],
+          "properties": {
+            "enabled": {"type": ["boolean", "null"]}, "source": {"enum": ["default", "environment", "file", "unknown"]},
+            "updated_at": {"anyOf": [{"$ref": "#/$defs/time"}, {"type": "null"}]}
+          },
+          "allOf": [
+            {"if": {"properties": {"source": {"const": "unknown"}}}, "then": {"properties": {"enabled": {"type": "null"}}}, "else": {"properties": {"enabled": {"type": "boolean"}}}},
+            {"if": {"properties": {"source": {"const": "file"}}}, "then": {"properties": {"updated_at": {"$ref": "#/$defs/time"}}}, "else": {"properties": {"updated_at": {"type": "null"}}}}
+          ]
+        },
+        "health": {
+          "type": "object", "additionalProperties": false, "required": ["status", "observed_hooks"],
+          "properties": {
+            "status": {"enum": ["disabled", "healthy", "unverified", "stale", "error"]},
+            "observed_hooks": {"type": "object", "additionalProperties": false, "properties": {
+              "SessionStart": {"$ref": "#/$defs/time"}, "PreToolUse": {"$ref": "#/$defs/time"},
+              "PostToolUse": {"$ref": "#/$defs/time"}, "Stop": {"$ref": "#/$defs/time"}
+            }}
+          },
+          "allOf": [
+            {"if": {"properties": {"status": {"enum": ["disabled", "unverified"]}}}, "then": {"properties": {"observed_hooks": {"maxProperties": 0}}}},
+            {"if": {"properties": {"status": {"enum": ["healthy", "stale"]}}}, "then": {"properties": {"observed_hooks": {"minProperties": 1}}}},
+            {"if": {"properties": {"status": {"const": "healthy"}}}, "then": {"properties": {"observed_hooks": {"required": ["PreToolUse", "PostToolUse"]}}}}
+          ]
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"health": {"properties": {"status": {"const": "disabled"}}}}}, "then": {"properties": {"preference": {"properties": {"enabled": {"const": false}}}}}},
+        {"if": {"properties": {"health": {"properties": {"status": {"enum": ["healthy", "unverified", "stale"]}}}}}, "then": {"properties": {"preference": {"properties": {"enabled": {"const": true}}}}}},
+        {"if": {"properties": {"health": {"properties": {"status": {"enum": ["healthy", "stale"]}}}}}, "then": {"properties": {"session_id": {"$ref": "#/$defs/label"}}}}
+      ],
+      "$defs": {
+        "label": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f]*\\S[^\\u0000-\\u001f\\u007f]*$"},
+        "path": {"type": "string", "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"},
+        "time": {"type": "string", "maxLength": 40, "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$"}
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$"
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "resolved_at"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "remediated",
+            "non_remediation"
+          ]
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "verification_id": {
+          "$ref": "#/$defs/id"
+        },
+        "grant_id": {
+          "$ref": "#/$defs/id"
+        },
+        "receipt_id": {
+          "$ref": "#/$defs/id"
+        },
+        "transaction_id": {
+          "$ref": "#/$defs/id"
+        },
+        "disposition": {
+          "$ref": "#/$defs/id"
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "remediated"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "verification_id",
+              "grant_id",
+              "receipt_id",
+              "transaction_id"
+            ],
+            "properties": {
+              "disposition": false,
+              "explanation": false
+            }
+          },
+          "else": {
+            "required": [
+              "disposition",
+              "explanation"
+            ],
+            "properties": {
+              "verification_id": false,
+              "grant_id": false,
+              "receipt_id": false,
+              "transaction_id": false
+            }
+          }
+        }
+      ]
+    },
+    "incident": {
+      "title": "Skills Auditor durable incident v1",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "incident_id",
+        "signature",
+        "installation_id",
+        "skill_id",
+        "version_id",
+        "grant_id",
+        "state",
+        "opened_at",
+        "updated_at",
+        "opening_verification_id",
+        "latest_verification_id",
+        "observation_count",
+        "reason_codes",
+        "evidence",
+        "resolution",
+        "superseded_by"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "skills-auditor-incident/v1"
+        },
+        "incident_id": {
+          "type": "string",
+          "pattern": "^incident-[0-9a-f]{64}$"
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "installation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "skill_id": {
+          "$ref": "#/$defs/id"
+        },
+        "version_id": {
+          "$ref": "#/$defs/id"
+        },
+        "grant_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opening_verification_id": {
+          "$ref": "#/$defs/id"
+        },
+        "latest_verification_id": {
+          "$ref": "#/$defs/id"
+        },
+        "state": {
+          "enum": [
+            "open",
+            "investigating",
+            "resolved",
+            "superseded"
+          ]
+        },
+        "opened_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "observation_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason_codes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "required": [
+              "code",
+              "expected",
+              "actual"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/$defs/id"
+              },
+              "expected": {},
+              "actual": {},
+              "path": {
+                "type": "string",
+                "maxLength": 1000
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "resolved_at"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "remediated",
+                    "non_remediation"
+                  ]
+                },
+                "resolved_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "verification_id": {
+                  "$ref": "#/$defs/id"
+                },
+                "grant_id": {
+                  "$ref": "#/$defs/id"
+                },
+                "receipt_id": {
+                  "$ref": "#/$defs/id"
+                },
+                "transaction_id": {
+                  "$ref": "#/$defs/id"
+                },
+                "disposition": {
+                  "$ref": "#/$defs/id"
+                },
+                "explanation": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "kind": {
+                        "const": "remediated"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "verification_id",
+                      "grant_id",
+                      "receipt_id",
+                      "transaction_id"
+                    ],
+                    "properties": {
+                      "disposition": false,
+                      "explanation": false
+                    }
+                  },
+                  "else": {
+                    "required": [
+                      "disposition",
+                      "explanation"
+                    ],
+                    "properties": {
+                      "verification_id": false,
+                      "grant_id": false,
+                      "receipt_id": false,
+                      "transaction_id": false
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "superseded_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "resolved"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resolution": {
+                "type": "object"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "resolution": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "superseded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "superseded_by": {
+                "type": "string"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "superseded_by": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

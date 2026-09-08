@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/lifecycle-incident-v1.schema.json",
+  "title": "Skills Auditor durable incident v1",
+  "type": "object",
+  "required": ["schema_version", "incident_id", "signature", "installation_id", "skill_id", "version_id", "grant_id", "state", "opened_at", "updated_at", "opening_verification_id", "latest_verification_id", "observation_count", "reason_codes", "evidence", "resolution", "superseded_by"],
+  "properties": {
+    "schema_version": {"const": "skills-auditor-incident/v1"},
+    "incident_id": {"type": "string", "pattern": "^incident-[0-9a-f]{64}$"},
+    "signature": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "installation_id": {"$ref": "#/$defs/id"},
+    "skill_id": {"$ref": "#/$defs/id"},
+    "version_id": {"$ref": "#/$defs/id"},
+    "grant_id": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+    "opening_verification_id": {"$ref": "#/$defs/id"},
+    "latest_verification_id": {"$ref": "#/$defs/id"},
+    "state": {"enum": ["open", "investigating", "resolved", "superseded"]},
+    "opened_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "observation_count": {"type": "integer", "minimum": 1},
+    "reason_codes": {"type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+    "evidence": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "object", "required": ["code", "expected", "actual"], "properties": {"code": {"$ref": "#/$defs/id"}, "expected": {}, "actual": {}, "path": {"type": "string", "maxLength": 1000}}, "additionalProperties": false}},
+    "resolution": {
+      "anyOf": [{"type": "null"}, {
+        "type": "object", "additionalProperties": false, "required": ["kind", "resolved_at"],
+        "properties": {
+          "kind": {"enum": ["remediated", "non_remediation"]}, "resolved_at": {"type": "string", "format": "date-time"},
+          "verification_id": {"$ref": "#/$defs/id"}, "grant_id": {"$ref": "#/$defs/id"}, "receipt_id": {"$ref": "#/$defs/id"}, "transaction_id": {"$ref": "#/$defs/id"},
+          "disposition": {"$ref": "#/$defs/id"}, "explanation": {"type": "string", "minLength": 1, "maxLength": 4096}
+        },
+        "allOf": [{"if": {"properties": {"kind": {"const": "remediated"}}}, "then": {"required": ["verification_id", "grant_id", "receipt_id", "transaction_id"], "properties": {"disposition": false, "explanation": false}}, "else": {"required": ["disposition", "explanation"], "properties": {"verification_id": false, "grant_id": false, "receipt_id": false, "transaction_id": false}}}]
+      }]
+    },
+    "superseded_by": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]}
+  },
+  "allOf": [
+    {"if": {"properties": {"state": {"const": "resolved"}}}, "then": {"properties": {"resolution": {"type": "object"}}}, "else": {"properties": {"resolution": {"type": "null"}}}},
+    {"if": {"properties": {"state": {"const": "superseded"}}}, "then": {"properties": {"superseded_by": {"type": "string"}}}, "else": {"properties": {"superseded_by": {"type": "null"}}}}
+  ],
+  "$defs": {"id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$"}}
+}

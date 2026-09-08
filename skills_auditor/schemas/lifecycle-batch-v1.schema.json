@@ -1,0 +1,438 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/lifecycle-batch-v1.schema.json",
+  "title": "Managed recoverable batch contracts v1",
+  "description": "Ordered local child transactions with explicit inverse approval. Completed inverse work does not imply every original child was compensated; inspect uncompensated. Shape validation does not replace runtime checksum, binding, precondition or receipt checks.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/plan"
+    },
+    {
+      "$ref": "#/$defs/transaction"
+    },
+    {
+      "$ref": "#/$defs/receipt"
+    }
+  ],
+  "$defs": {
+    "child": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "plan",
+        "transaction_id",
+        "compensates_transaction_id",
+        "note"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "apply",
+            "compensate"
+          ]
+        },
+        "plan": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/plan"
+        },
+        "transaction_id": {
+          "anyOf": [
+            {
+              "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "compensates_transaction_id": {
+          "anyOf": [
+            {
+              "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "compensate"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "transaction_id": {
+                "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+              },
+              "compensates_transaction_id": {
+                "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "transaction_id": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "child_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "transaction_id",
+        "state",
+        "receipt_id"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 49
+        },
+        "transaction_id": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "running",
+            "completed",
+            "compensated"
+          ]
+        },
+        "receipt_id": {
+          "anyOf": [
+            {
+              "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "plan_id",
+        "project_root",
+        "created_at",
+        "children",
+        "compensates_batch_id",
+        "compensates_revision",
+        "uncompensated"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "skills-auditor-lifecycle-batch-plan/v1"
+        },
+        "plan_id": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/hash"
+        },
+        "project_root": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/path"
+        },
+        "created_at": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/time"
+        },
+        "children": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/child"
+          }
+        },
+        "compensates_batch_id": {
+          "anyOf": [
+            {
+              "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "compensates_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uncompensated": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "transaction_id",
+              "reason_code"
+            ],
+            "properties": {
+              "transaction_id": {
+                "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+              },
+              "reason_code": {
+                "$ref": "lifecycle-core-v1.schema.json#/$defs/label"
+              }
+            }
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "compensates_batch_id": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "compensates_revision": {
+            "const": 0
+          },
+          "uncompensated": {
+            "maxItems": 0
+          },
+          "children": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "kind": {
+                  "const": "apply"
+                },
+                "compensates_transaction_id": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "compensates_revision": {
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "transaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "batch_id",
+        "plan",
+        "approved_plan_id",
+        "actor",
+        "created_at",
+        "state",
+        "children",
+        "error",
+        "recovery_errors",
+        "receipt_id",
+        "compensation_batch_id"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "skills-auditor-lifecycle-batch-transaction/v1"
+        },
+        "batch_id": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+        },
+        "plan": {
+          "$ref": "#/$defs/plan"
+        },
+        "approved_plan_id": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/hash"
+        },
+        "actor": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/name"
+        },
+        "created_at": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/time"
+        },
+        "state": {
+          "enum": [
+            "prepared",
+            "applying",
+            "recovery_needed",
+            "completed",
+            "compensating",
+            "compensated"
+          ]
+        },
+        "children": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/child_result"
+          }
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "lifecycle-core-v1.schema.json#/$defs/failure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recovery_errors": {
+          "type": "array",
+          "items": {
+            "$ref": "lifecycle-core-v1.schema.json#/$defs/failure"
+          }
+        },
+        "receipt_id": {
+          "anyOf": [
+            {
+              "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "compensation_batch_id": {
+          "anyOf": [
+            {
+              "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "state": {
+            "const": "completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "receipt_id": {
+            "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+          },
+          "children": {
+            "items": {
+              "properties": {
+                "state": {
+                  "enum": [
+                    "completed",
+                    "compensated"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "receipt_id",
+        "batch_id",
+        "plan_id",
+        "status",
+        "completed_at",
+        "children",
+        "compensates_batch_id",
+        "uncompensated"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "skills-auditor-lifecycle-batch-receipt/v1"
+        },
+        "receipt_id": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+        },
+        "batch_id": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+        },
+        "plan_id": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/hash"
+        },
+        "status": {
+          "const": "completed"
+        },
+        "completed_at": {
+          "$ref": "lifecycle-core-v1.schema.json#/$defs/time"
+        },
+        "children": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/child_result"
+              }
+            ],
+            "properties": {
+              "state": {
+                "enum": [
+                  "completed",
+                  "compensated"
+                ]
+              }
+            }
+          }
+        },
+        "compensates_batch_id": {
+          "anyOf": [
+            {
+              "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uncompensated": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "transaction_id",
+              "reason_code"
+            ],
+            "properties": {
+              "transaction_id": {
+                "$ref": "lifecycle-core-v1.schema.json#/$defs/id"
+              },
+              "reason_code": {
+                "$ref": "lifecycle-core-v1.schema.json#/$defs/label"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

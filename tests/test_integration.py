@@ -496,7 +496,18 @@ class TestIntegrationCli(IntegrationFixture):
             path.name: json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(schema_root.glob("*.schema.json"))
         }
-        self.assertEqual(len(schemas), 5)
+        # New versioned lifecycle contracts are additive. Keep the historical
+        # integration contract inventory exact without forbidding new families.
+        self.assertEqual(
+            {name for name in schemas if not name.startswith("lifecycle-")},
+            {
+                "error-v1.schema.json",
+                "integration-plan-v1.schema.json",
+                "integration-receipt-v1.schema.json",
+                "integration-spec-v1.schema.json",
+                "integration-verification-v1.schema.json",
+            },
+        )
         for name, schema in schemas.items():
             with self.subTest(schema=name):
                 Draft202012Validator.check_schema(schema)

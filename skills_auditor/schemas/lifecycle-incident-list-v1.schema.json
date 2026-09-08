@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/blob/main/skills_auditor/schemas/lifecycle-incident-list-v1.schema.json",
+  "title": "Managed incident list v1",
+  "type": "object",
+  "required": ["schema_version", "incidents"],
+  "properties": {
+    "schema_version": {"const": "skills-auditor-lifecycle-incident-list/v1"},
+    "incidents": {"type": "array", "items": {"$ref": "lifecycle-incident-v1.schema.json"}}
+  },
+  "additionalProperties": false
+}
