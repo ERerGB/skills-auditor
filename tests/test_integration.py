@@ -74,6 +74,14 @@ class TestIntegrationCore(IntegrationFixture):
             verification = verify_receipt(receipt)
             self.assertEqual(verification["schema_version"], VERIFICATION_SCHEMA)
             self.assertEqual(verification["status"], "passed")
+            self.assertEqual(
+                verification["approval"],
+                {
+                    "state": "valid",
+                    "requires_reapproval": False,
+                    "reason_codes": [],
+                },
+            )
 
             second = build_integration_plan(self.spec(project, source, target))
             self.assertEqual(second["summary"]["changes"], 0)
@@ -119,6 +127,14 @@ class TestIntegrationCore(IntegrationFixture):
             payload.write_text("print('v3')\n", encoding="utf-8")
             verification = verify_receipt(receipt)
             self.assertEqual(verification["status"], "failed")
+            self.assertEqual(
+                verification["approval"],
+                {
+                    "state": "invalidated",
+                    "requires_reapproval": True,
+                    "reason_codes": ["source_tree"],
+                },
+            )
             self.assertIn(
                 "source_tree",
                 {check["code"] for check in verification["checks"] if not check["ok"]},
@@ -430,7 +446,9 @@ class TestIntegrationCli(IntegrationFixture):
                 "verify", str(receipt_path), "--format", "json"
             )
             self.assertEqual(code, 0, stderr)
-            self.assertEqual(json.loads(stdout)["status"], "passed")
+            verification_output = json.loads(stdout)
+            self.assertEqual(verification_output["status"], "passed")
+            self.assertEqual(verification_output["approval"]["state"], "valid")
 
     def test_json_error_has_stable_schema_and_exit_code(self) -> None:
         code, stdout, stderr = self.run_cli("integrate", "--format", "json")
@@ -501,3 +519,108 @@ class TestIntegrationCli(IntegrationFixture):
             for name, document in documents.items():
                 with self.subTest(document=name):
                     validate(instance=document, schema=schemas[name])
+
+            historical_verification = dict(verification)
+            historical_verification.pop("approval")
+            validate(
+                instance=historical_verification,
+                schema=schemas["integration-verification-v1.schema.json"],
+            )
+
+    def test_verification_schema_enforces_approval_cross_field_consistency(self) -> None:
+        try:
+            from jsonschema import ValidationError, validate
+        except ImportError:
+            self.skipTest("install the test extra to validate public JSON schemas")
+
+        schema_path = (
+            Path(__file__).parents[1]
+            / "skills_auditor"
+            / "schemas"
+            / "integration-verification-v1.schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        check_codes = ("receipt_not_completed", "target_link", "source_tree")
+
+        def verification_document(failed_codes: tuple[str, ...]) -> dict:
+            failed = set(failed_codes)
+            checks = [
+                {"code": code, "ok": code not in failed}
+                for code in check_codes
+            ]
+            return {
+                "schema_version": "skills-auditor-verification/v1",
+                "checked_at": "2026-09-03T00:00:00Z",
+                "receipt_id": "receipt-" + "0" * 20,
+                "plan_id": "plan-" + "0" * 20,
+                "status": "failed" if failed else "passed",
+                "checks": checks,
+                "approval": {
+                    "state": "invalidated" if failed else "valid",
+                    "requires_reapproval": bool(failed),
+                    "reason_codes": list(failed_codes),
+                },
+                "summary": {
+                    "checks": len(checks),
+                    "passed": len(checks) - len(failed),
+                    "failed": len(failed),
+                },
+            }
+
+        valid_reason_sets = (
+            (),
+            ("receipt_not_completed",),
+            ("target_link",),
+            ("source_tree",),
+            ("receipt_not_completed", "target_link"),
+            ("receipt_not_completed", "source_tree"),
+            ("target_link", "source_tree"),
+            check_codes,
+        )
+        for failed_codes in valid_reason_sets:
+            with self.subTest(valid_reason_codes=failed_codes):
+                validate(instance=verification_document(failed_codes), schema=schema)
+
+        historical_verification = verification_document(("target_link",))
+        historical_verification.pop("approval")
+        historical_verification["status"] = "passed"
+        validate(instance=historical_verification, schema=schema)
+
+        failed_check_claimed_valid = verification_document(("target_link",))
+        failed_check_claimed_valid["status"] = "passed"
+        failed_check_claimed_valid["approval"] = {
+            "state": "valid",
+            "requires_reapproval": False,
+            "reason_codes": [],
+        }
+
+        successful_checks_claimed_failed = verification_document(())
+        successful_checks_claimed_failed["status"] = "failed"
+        successful_checks_claimed_failed["approval"] = {
+            "state": "invalidated",
+            "requires_reapproval": True,
+            "reason_codes": ["target_link"],
+        }
+
+        duplicate_reason = verification_document(("target_link",))
+        duplicate_reason["approval"]["reason_codes"] = ["target_link", "target_link"]
+
+        invalid_documents = [
+            ("failed-check-claimed-valid", failed_check_claimed_valid),
+            ("successful-checks-claimed-failed", successful_checks_claimed_failed),
+            ("duplicate-reason", duplicate_reason),
+        ]
+        for index, reason_code in enumerate(check_codes):
+            companion = check_codes[(index + 1) % len(check_codes)]
+            missing_failed_reason = verification_document((reason_code, companion))
+            missing_failed_reason["approval"]["reason_codes"] = [companion]
+            invalid_documents.append((f"missing-{reason_code}", missing_failed_reason))
+
+            spurious_reason = verification_document((companion,))
+            spurious_reason["approval"]["reason_codes"] = [companion, reason_code]
+            invalid_documents.append((f"spurious-{reason_code}", spurious_reason))
+
+        for label, document in invalid_documents:
+            with self.subTest(invalid=document, label=label):
+                with self.assertRaises(ValidationError):
+                    validate(instance=document, schema=schema)

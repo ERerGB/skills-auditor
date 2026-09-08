@@ -84,11 +84,18 @@ class TestCliTransactionalSurface(CliSurfaceFixture):
             self.assertEqual(code, 0, error)
             self.assertIn("Verify the installed state", output)
 
+            code, output, error = self.run_cli("verify", str(receipt), cwd=project)
+            self.assertEqual(code, 0, error)
+            self.assertIn("approval: valid", output)
+
             (canonical / "payload.txt").write_text("drift\n", encoding="utf-8")
             code, output, error = self.run_cli("verify", str(receipt), cwd=project)
             self.assertEqual(code, 3, error)
             self.assertIn("status: failed", output)
+            self.assertIn("approval: invalidated", output)
             self.assertIn("FAIL source_tree", output)
+            self.assertIn("re-approval required", output)
+            self.assertIn("skills-audit integrate", output)
 
     def test_human_integration_errors_include_structured_details(self) -> None:
         with tempfile.TemporaryDirectory() as base:

@@ -8,7 +8,8 @@ to a valuable install root.
 - `integrate` writes a local plan but does not change source or target entries.
 - `apply` accepts only a versioned plan and verifies its content checksum, full source-tree hashes, and
   affected target-entry snapshots before writing.
-- `verify` checks receipt-scoped links and source-tree hashes.
+- `verify` checks receipt-scoped links and source-tree hashes, then reports whether the associated
+  approval remains valid or requires re-approval.
 - Primitive repair, dedup, route, and sync commands remain plan-first.
 - The agent skill is plan-first; explicit apply authorization is required.
 - Route defaults to archive. Delete requires explicit strategy and apply authorization.
@@ -26,6 +27,12 @@ failed receipt when possible; preserve it for repair and handoff.
 Installed entries are live symlinks, not immutable copies. A source edit after apply is immediately
 visible to the host; `verify` detects that drift but cannot prevent consumption between checks.
 Pin or protect canonical checkouts when runtime immutability matters.
+
+Integration approval is version-bound and renewable, not permanent trust. Only a completed receipt
+whose target links and source-tree hashes still match retains a valid approval state. A failed
+receipt or any verification drift invalidates that approval; generate and review a new plan for the
+current state before explicitly approving another apply. This status does not prove that the Skill's
+behavior is safe or benign.
 
 Plan IDs and receipt IDs are content checksums, not signatures. Protect plan files with the same
 access controls as the target roots they authorize.

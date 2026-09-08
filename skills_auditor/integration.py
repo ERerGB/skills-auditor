@@ -1320,7 +1320,10 @@ def verify_receipt(receipt: Dict[str, Any]) -> Dict[str, Any]:
             }
         )
 
-    passed = all(check.get("ok") for check in checks)
+    failed_reason_codes = list(
+        dict.fromkeys(str(check["code"]) for check in checks if not check.get("ok"))
+    )
+    passed = not failed_reason_codes
     return {
         "schema_version": VERIFICATION_SCHEMA,
         "checked_at": _utc_now(),
@@ -1328,6 +1331,11 @@ def verify_receipt(receipt: Dict[str, Any]) -> Dict[str, Any]:
         "plan_id": receipt.get("plan_id"),
         "status": "passed" if passed else "failed",
         "checks": checks,
+        "approval": {
+            "state": "valid" if passed else "invalidated",
+            "requires_reapproval": not passed,
+            "reason_codes": failed_reason_codes,
+        },
         "summary": {
             "checks": len(checks),
             "passed": sum(1 for check in checks if check.get("ok")),

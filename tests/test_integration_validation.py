@@ -400,6 +400,43 @@ class TestReceiptValidation(IntegrationValidationFixture):
             validation = verify_receipt(failed)
             self.assertEqual(validation["status"], "failed")
             self.assertEqual(validation["checks"][0]["code"], "receipt_not_completed")
+            self.assertEqual(
+                validation["approval"],
+                {
+                    "state": "invalidated",
+                    "requires_reapproval": True,
+                    "reason_codes": ["receipt_not_completed"],
+                },
+            )
+
+    def test_target_link_approval_reason_is_stable_and_deduplicated(self) -> None:
+        with tempfile.TemporaryDirectory() as base:
+            project = Path(base)
+            source = project / "source"
+            target = project / "target"
+            self.write_skill(source, "alpha")
+            self.write_skill(source, "beta")
+            plan = build_integration_plan(
+                IntegrationSpec(
+                    project_root=project,
+                    sources=(source,),
+                    targets=(IntegrationTarget("test", root=target),),
+                )
+            )
+            receipt, _ = apply_integration_plan(plan, project / "receipt.json")
+
+            (target / "alpha").unlink()
+            (target / "beta").unlink()
+
+            validation = verify_receipt(receipt)
+            self.assertEqual(
+                validation["approval"],
+                {
+                    "state": "invalidated",
+                    "requires_reapproval": True,
+                    "reason_codes": ["target_link"],
+                },
+            )
 
 
 class TestApplyFailureSemantics(IntegrationValidationFixture):
