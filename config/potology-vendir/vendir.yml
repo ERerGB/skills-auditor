@@ -1,0 +1,9 @@
+apiVersion: vendir.k14s.io/v1alpha1
+kind: Config
+directories:
+- path: payload
+  contents:
+  - path: .
+    git:
+      url: https://github.com/the-mag-tech/potology.git
+      ref: 9f1fd18022ecaaee14f8d2a67bf35821f48dc710

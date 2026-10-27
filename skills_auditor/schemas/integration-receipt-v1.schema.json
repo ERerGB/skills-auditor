@@ -5,6 +5,19 @@
   "type": "object",
   "required": ["schema_version", "receipt_id", "plan_id", "applied_at", "status", "results", "error"],
   "properties": {
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256", "mode"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "mode": {"type": "integer", "minimum": 0, "maximum": 4095}
+        },
+        "additionalProperties": false
+      }
+    },
     "schema_version": {"const": "skills-auditor-receipt/v1"},
     "receipt_id": {"type": "string", "pattern": "^receipt-[0-9a-f]{20}$"},
     "plan_id": {"type": "string", "pattern": "^plan-[0-9a-f]{20}$"},

@@ -1,0 +1,30 @@
+{
+  "schema_version": "skills-auditor-integration/v1",
+  "project_root": ".",
+  "sources": [
+    "payload/.agents/skills"
+  ],
+  "required_files": [
+    "vendir.yml",
+    "vendir.lock.yml",
+    "payload/AGENTS.md",
+    "payload/docs/repo-context.md",
+    "payload/docs/context-migration-standard.md",
+    "payload/docs/remote-work.md",
+    "payload/docs/context-protocol.md",
+    "payload/tools/check-workspace.py",
+    "payload/tools/repo-context.py",
+    "payload/tools/context_migration.py",
+    "payload/tools/context_archive.py",
+    "payload/tools/context_protocol.py",
+    "payload/tools/context-schema.json",
+    "payload/tools/context-migration-schema.json"
+  ],
+  "targets": [
+    {
+      "environment": "codex",
+      "root": "host/.agents/skills"
+    }
+  ],
+  "metadata_platform": "codex"
+}

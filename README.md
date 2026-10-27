@@ -174,6 +174,7 @@ If you are integrating, extending, or automating it:
 | --- | --- |
 | Use versioned plans, receipts, and JSON | [Integration contract](docs/integration-contract.md) |
 | Manage versions, authorization and recovery | [Managed lifecycle](docs/managed-lifecycle.md) |
+| Deliver pinned skills across filesystems with native vendir | [Vendir integration and Potology example](docs/vendir-integration.md) |
 | Automate checks in CI | [CI and automation](docs/ci.md) |
 | Inspect the agent and Python surfaces | [Skill contract and API reference](docs/skill-contract.md) |
 | Maintain or compare the project | [Releasing](docs/releasing.md) · [Alternatives](docs/alternatives.md) |

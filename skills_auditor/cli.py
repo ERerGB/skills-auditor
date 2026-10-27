@@ -2175,6 +2175,12 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
         help="Canonical SKILL.md source root. Repeatable; overrides config sources.",
     )
     p_integrate.add_argument(
+        "--require-file",
+        action="append",
+        default=[],
+        help="Required dependency file; capture bytes and permissions for apply/verify. Repeatable; overrides config required_files.",
+    )
+    p_integrate.add_argument(
         "--target",
         action="append",
         default=[],
@@ -2801,6 +2807,7 @@ def _main(prog: Optional[str] = None) -> int:
                 cli_sources=args.source,
                 cli_targets=args.target,
                 cli_target_roots=args.target_root,
+                cli_required_files=args.require_file,
                 metadata_platform=args.metadata_platform,
             )
             plan = build_integration_plan(spec)

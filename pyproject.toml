@@ -53,6 +53,7 @@ include = [
   "/docs",
   "/doc/sensor-plugin-architecture.md",
   "/e2e_tests",
+  "/experiments/vendir-potology",
   "/scripts",
   "/smoke_tests",
   "/tests",

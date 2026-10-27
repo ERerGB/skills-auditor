@@ -1,0 +1,9 @@
+apiVersion: vendir.k14s.io/v1alpha1
+directories:
+- contents:
+  - git:
+      commitTitle: 'Merge pull request #5: task-handoff skill...'
+      sha: 9f1fd18022ecaaee14f8d2a67bf35821f48dc710
+    path: .
+  path: payload
+kind: LockConfig

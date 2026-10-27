@@ -20,6 +20,7 @@ durable invalidation, stable installation identities and explicit crash recovery
 
 - the plan content still matches its `plan_id`;
 - every recorded source tree still has the reviewed SHA-256 hash;
+- every explicitly required dependency file still has the reviewed bytes and permissions;
 - every affected target entry still has the reviewed missing, file, directory, or symlink state;
 - every reserved archive destination is still missing;
 - every action points to the source record with the same alias and tree hash.
@@ -46,6 +47,15 @@ Repository configuration is optional. When `skills-auditor.json` exists in the c
 Paths in the config resolve relative to `project_root`, which itself resolves relative to the
 config file. CLI `--source` and `--target` lists replace the corresponding config lists.
 
+Optional `required_files` lists dependency files outside the skill directory, for example
+`["payload/tools/context_protocol.py", "vendir.yml", "vendir.lock.yml"]`. CLI `--require-file PATH`
+is repeatable and replaces that list when supplied; CLI paths resolve from the working directory.
+These are explicit operator-selected files, not inferred imports or a dependency solver.
+Paths are resolved to canonical files at planning time; aliases are not separately watched.
+Directories and files inside an installation root are rejected. Referenced files need to remain
+regular files at those canonical paths. Include every external file needed by the workflow and
+run project behavior checks separately. See the [vendir recipe](vendir-integration.md).
+
 Targets accept these forms:
 
 | Form | Meaning |
@@ -59,6 +69,11 @@ Built-in environment names are `cursor`, `claude-code`, and `codex`. High-level 
 source and target roots to be disjoint and rejects target roots that contain each other. Use a
 precise canonical source tree rather than asking the tool to install within a source or source from
 within an install namespace.
+
+The built-in `codex` roots above retain the legacy convention for compatibility. Current Codex
+uses `.agents/skills`; select `--target-root codex=/path/to/host/.agents/skills` explicitly for that
+runtime. The vendir recipe and live acceptance probe use this native location. Existing registrations
+are not automatically moved or duplicated.
 
 Template: [`../config/skills-auditor.integration.example.json`](../config/skills-auditor.integration.example.json).
 
@@ -84,6 +99,12 @@ atomically to `.skills-auditor-local/plans/<plan-id>.json` unless `--plan-out` i
 and literal symlink targets. Source symlinks that resolve outside their skill tree are rejected,
 so the hash never claims to cover unbounded external content. The checksum detects accidental or
 stale edits; it is not a signature or authorization token.
+
+When required files are selected, the plan embeds an optional `dependencies` array of canonical
+`path`, content `sha256`, and permission `mode`. These snapshots participate in the existing plan
+checksum and are copied into the receipt. Apply checks them before writes, before each action, and
+at completion. They are deployment observations, not a second package lock or proof that a file
+came from a trusted publisher. Source resolution and version locking remain with vendir.
 
 ## Apply and receipt
 
@@ -138,6 +159,12 @@ does not restore files, roll back versions, or approve a different version.
 Verification does not prove runtime behavior or semantic skill safety. Installed entries remain
 live symlinks, so verification can detect a source change but cannot prevent a host from consuming
 it between verification runs.
+
+Receipts with dependencies additionally verify the selected files' bytes and permissions. Missing,
+changed, unreadable, or replaced-by-symlink files fail with a `required_file` check and exit `3`.
+Old plans/receipts without these optional fields retain their original meaning; they do not gain
+dependency coverage automatically. Older Auditor versions reject the new fields rather than
+silently ignoring the checks. Generate, apply, and verify with a version supporting this extension.
 
 ## Machine interface
 
