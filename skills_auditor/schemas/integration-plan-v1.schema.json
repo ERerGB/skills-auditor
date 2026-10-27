@@ -5,6 +5,19 @@
   "type": "object",
   "required": ["schema_version", "plan_id", "created_at", "spec", "source_skills", "targets", "summary"],
   "properties": {
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256", "mode"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "mode": {"type": "integer", "minimum": 0, "maximum": 4095}
+        },
+        "additionalProperties": false
+      }
+    },
     "schema_version": {"const": "skills-auditor-plan/v1"},
     "plan_id": {"type": "string", "pattern": "^plan-[0-9a-f]{20}$"},
     "created_at": {"type": "string", "format": "date-time"},
@@ -15,6 +28,7 @@
       "properties": {
         "schema_version": {"const": "skills-auditor-integration/v1"},
         "project_root": {"type": "string", "minLength": 1},
+        "required_files": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "sources": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
         "targets": {
           "type": "array",

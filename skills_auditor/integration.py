@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -85,6 +86,7 @@ class IntegrationSpec:
     sources: Tuple[Path, ...]
     targets: Tuple[IntegrationTarget, ...]
     metadata_platform: str = "codex"
+    required_files: Tuple[Path, ...] = ()
 
 
 def _utc_now() -> str:
@@ -176,6 +178,7 @@ def load_integration_spec(
     cli_sources: Sequence[str] = (),
     cli_targets: Sequence[str] = (),
     cli_target_roots: Sequence[str] = (),
+    cli_required_files: Sequence[str] = (),
     metadata_platform: str = "",
     cwd: Optional[Path] = None,
 ) -> IntegrationSpec:
@@ -209,6 +212,7 @@ def load_integration_spec(
             "sources",
             "targets",
             "metadata_platform",
+            "required_files",
         }
         if unknown:
             raise IntegrationError(
@@ -243,6 +247,14 @@ def load_integration_spec(
     source_base = working_dir if cli_sources else project_root
     sources = _dedupe_paths(_resolve_path(str(item), source_base) for item in source_values)
 
+    required_values = list(cli_required_files) if cli_required_files else data.get("required_files", [])
+    if not isinstance(required_values, list) or not all(
+        isinstance(item, str) and item.strip() for item in required_values
+    ):
+        raise IntegrationError("invalid_required_files", "required_files must be a list of path strings")
+    required_base = working_dir if cli_required_files else project_root
+    required_files = _dedupe_paths(_resolve_path(item, required_base) for item in required_values)
+
     target_values: object = (
         list(cli_targets)
         if cli_targets or cli_target_roots
@@ -268,6 +280,7 @@ def load_integration_spec(
         sources=sources,
         targets=tuple(targets),
         metadata_platform=selected_metadata.strip(),
+        required_files=required_files,
     )
 
 
@@ -417,6 +430,7 @@ def _spec_dict(
             for target, root in resolved_targets
         ],
         "metadata_platform": spec.metadata_platform,
+        **({"required_files": [str(path) for path in spec.required_files]} if spec.required_files else {}),
     }
 
 
@@ -469,12 +483,61 @@ def _normalize_spec(spec: IntegrationSpec) -> IntegrationSpec:
             for target in spec.targets
         ),
         metadata_platform=spec.metadata_platform,
+        required_files=_dedupe_paths(path.expanduser().resolve(strict=False) for path in spec.required_files),
     )
+
+
+def _dependency_snapshot(path: Path) -> Dict[str, Any]:
+    """Observe explicitly selected files; never infer dependencies or execute hooks."""
+    if path.resolve(strict=False) != path or not stat.S_ISREG(path.lstat().st_mode):
+        raise ValueError(f"required file must remain a canonical regular file: {path}")
+    return {
+        "path": str(path),
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "mode": stat.S_IMODE(path.stat().st_mode),
+    }
+
+
+def _dependency_checks(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    checks = []
+    for expected in records:
+        try:
+            actual = _dependency_snapshot(Path(expected["path"]))
+        except (OSError, ValueError, RuntimeError):
+            actual = None
+        checks.append({"code": "required_file", "ok": actual == expected,
+                       "path": expected["path"], "expected": expected, "actual": actual})
+    return checks
+
+
+def _validate_dependencies(records: object, code: str) -> None:
+    if not isinstance(records, list):
+        raise IntegrationError(code, "dependencies must be a list")
+    seen = set()
+    for record in records:
+        if (not isinstance(record, dict)
+                or not _exact_keys(record, {"path", "sha256", "mode"})
+                or not _absolute_path(record.get("path"))
+                or not _sha256(record.get("sha256"))
+                or type(record.get("mode")) is not int
+                or not 0 <= record["mode"] <= 0o7777
+                or record["path"] in seen):
+            raise IntegrationError(code, "invalid or duplicate dependency record")
+        seen.add(record["path"])
 
 
 def build_integration_plan(spec: IntegrationSpec) -> Dict[str, Any]:
     spec = _normalize_spec(spec)
     resolved_targets = _validate_spec(spec)
+    dependencies = []
+    for path in spec.required_files:
+        if any(_is_within(path, root) for _, root in resolved_targets):
+            raise IntegrationError("dependency_inside_target", f"required file is inside install root: {path}")
+        try:
+            dependencies.append(_dependency_snapshot(path))
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise IntegrationError("dependency_unavailable", f"required file unavailable: {path}: {exc}",
+                                   exit_code=EXIT_CONTRACT) from exc
     try:
         mapping = discover_sync_mapping(list(spec.sources))
     except ValueError as exc:
@@ -560,6 +623,8 @@ def build_integration_plan(spec: IntegrationSpec) -> Dict[str, Any]:
             if action["action"] in _ACTIONABLE
         ),
     }
+    if dependencies:
+        plan["dependencies"] = dependencies
     plan["plan_id"] = _plan_id(plan)
     return plan
 
@@ -693,7 +758,7 @@ def validate_plan(plan: Dict[str, Any]) -> None:
     if not _exact_keys(
         plan,
         {"schema_version", "plan_id", "created_at", "spec", "source_skills", "targets", "summary"},
-        {"plan_path"},
+        {"plan_path", "dependencies"},
     ):
         raise IntegrationError("invalid_plan", "plan contains missing or unknown fields")
     spec = plan.get("spec")
@@ -704,6 +769,7 @@ def validate_plan(plan: Dict[str, Any]) -> None:
         or not _exact_keys(
             spec,
             {"schema_version", "project_root", "sources", "targets", "metadata_platform"},
+            {"required_files"},
         )
         or spec.get("schema_version") != SPEC_SCHEMA
     ):
@@ -721,6 +787,10 @@ def validate_plan(plan: Dict[str, Any]) -> None:
         raise IntegrationError("invalid_plan", "plan source_skills must be a non-empty list")
     if not isinstance(targets, list) or not targets:
         raise IntegrationError("invalid_plan", "plan targets must be a non-empty list")
+    dependencies = plan.get("dependencies", [])
+    _validate_dependencies(dependencies, "invalid_plan")
+    if spec.get("required_files", []) != [item["path"] for item in dependencies]:
+        raise IntegrationError("invalid_plan", "dependencies do not match spec.required_files")
 
     source_by_name: Dict[str, Dict[str, Any]] = {}
     for source in sources:
@@ -763,6 +833,8 @@ def validate_plan(plan: Dict[str, Any]) -> None:
             raise IntegrationError("invalid_plan", "plan target does not match its spec")
 
         root = Path(target["root"]).resolve(strict=False)
+        if any(_is_within(Path(item["path"]), root) for item in dependencies):
+            raise IntegrationError("invalid_plan", "required files must be outside install roots")
         for source_root_text in spec["sources"]:
             source_root = Path(source_root_text)
             if _is_within(root, source_root) or _is_within(source_root, root):
@@ -898,7 +970,9 @@ def validate_plan(plan: Dict[str, Any]) -> None:
 
 def check_plan_preconditions(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
     validate_plan(plan)
-    issues: List[Dict[str, Any]] = []
+    issues: List[Dict[str, Any]] = [
+        check for check in _dependency_checks(plan.get("dependencies", [])) if not check["ok"]
+    ]
     for source in plan["source_skills"]:
         name = source["name"]
         skill_root = Path(source["skill_root"])
@@ -991,6 +1065,8 @@ def _build_receipt(
         "results": results,
         "error": error,
     }
+    if plan.get("dependencies"):
+        receipt["dependencies"] = plan["dependencies"]
     receipt["receipt_id"] = _receipt_id(receipt)
     return receipt
 
@@ -1075,6 +1151,11 @@ def apply_integration_plan(
         for target in plan["targets"]:
             root = Path(target["root"])
             for action_data in target["actions"]:
+                dependency_issues = [check for check in _dependency_checks(plan.get("dependencies", []))
+                                     if not check["ok"]]
+                if dependency_issues:
+                    raise IntegrationError("stale_plan", "required files changed while applying plan",
+                                           exit_code=EXIT_CONTRACT, details=dependency_issues)
                 expected_hash = action_data["expected_tree_sha256"]
                 source_root = Path(action_data["expected_target"])
                 current_hash = (
@@ -1167,6 +1248,11 @@ def apply_integration_plan(
                         "verified": True,
                     }
                 )
+        dependency_issues = [check for check in _dependency_checks(plan.get("dependencies", []))
+                             if not check["ok"]]
+        if dependency_issues:
+            raise IntegrationError("apply_verification_failed", "required files changed during apply",
+                                   exit_code=EXIT_CONTRACT, details=dependency_issues)
     except Exception as exc:
         error = (
             exc.to_dict()["error"]
@@ -1229,9 +1315,10 @@ def validate_receipt(receipt: Dict[str, Any]) -> None:
             "results",
             "error",
         },
-        {"receipt_path"},
+        {"receipt_path", "dependencies"},
     ):
         raise IntegrationError("invalid_receipt", "receipt contains missing or unknown fields")
+    _validate_dependencies(receipt.get("dependencies", []), "invalid_receipt")
     status = receipt.get("status")
     results = receipt.get("results")
     error = receipt.get("error")
@@ -1280,7 +1367,7 @@ def validate_receipt(receipt: Dict[str, Any]) -> None:
 
 def verify_receipt(receipt: Dict[str, Any]) -> Dict[str, Any]:
     validate_receipt(receipt)
-    checks: List[Dict[str, Any]] = []
+    checks: List[Dict[str, Any]] = _dependency_checks(receipt.get("dependencies", []))
     if receipt.get("status") != "completed":
         checks.append(
             {

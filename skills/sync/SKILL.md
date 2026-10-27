@@ -17,6 +17,9 @@ See the [parent preflight contract](../../SKILL.md#before-every-invocation-optio
 ## When to use
 
 - Operator has a maintained mapping file (see `config/sources.example.json`) or wants discovery-driven replication from source roots.
+- This cycle relinks sources already readable in the same target filesystem. For a new filesystem,
+  virtual environment or cloud host, use the parent [locked delivery workflow](../../SKILL.md#deliver-across-filesystems-and-restore-environments)
+  and [native vendir guide](../../docs/vendir-integration.md), then register locally. Do not copy absolute links across hosts.
 - Scoped: “sync dry-run”, `SKILLS_AUDITOR_MODE=sync`, `SKILLS_AUDITOR_SYNC_MAP_FILE`, or requests to replicate skills across agent environments.
 
 ## Commands

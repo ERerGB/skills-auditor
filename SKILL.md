@@ -1,8 +1,8 @@
 ---
 name: skills-auditor
 description: >
-  Chat-native, plan-first governance for auditing and bringing the same AI skills to local
-  workspaces. The agent chooses the integration or maintenance path from the operator's goal,
+  Chat-native, plan-first governance for auditing and delivering AI skills to local, remote
+  and cloud workspaces with native vendir locks and target-local registration. The agent chooses the integration or maintenance path from the operator's goal,
   presents a reviewable plan, waits for explicit approval, applies only the reviewed scope, and
   verifies the result.
 ---
@@ -25,6 +25,7 @@ smallest safe workflow:
 | “Audit the skills in this workspace” | Inspect active roots and plan the relevant maintenance |
 | “Fix metadata, duplicates, or variants” | Run only the matching maintenance cycle |
 | “Sync this authoritative mapping” | Run mapped sync against the named map |
+| “Move or restore this Skill in another filesystem or cloud environment” | Follow native locked delivery and target-local acceptance |
 | “Keep approved bytes stable while I edit” or “Manage this installed version” | Use the managed lifecycle, preserving candidate/active separation |
 | “This managed Skill is warning or an update was interrupted” | Read status and transaction evidence before proposing recovery |
 
@@ -140,6 +141,37 @@ Use `--target cursor`, `--target claude-code`, or `--target codex` for project r
 
 An optional repository `skills-auditor.json` can replace repeated source and target flags. Its
 contract is documented in [`docs/integration-contract.md`](docs/integration-contract.md).
+
+### Deliver across filesystems and restore environments
+
+Follow [native vendir delivery](docs/vendir-integration.md) for a new target filesystem,
+virtual environment or cloud host. Keep vendir's configuration and lock as the delivery contract;
+Auditor adds only explicit dependency acceptance and target-local registration.
+
+1. Resolve the actual target runtime and its Agent tool-visible storage. Confirm source access,
+   runtime prerequisites, authorization and any paid resource limits before provisioning.
+2. Materialize the reviewed source with `vendir sync --locked` in a new delivery directory.
+   Retain the whole required repository layout; a lone SKILL.md may depend on outer tools or docs.
+3. Declare reviewed external files through `required_files` / `--require-file`. Inspect their
+   byte/permission hashes and the host target in the integration plan. This is bounded dependency
+   acceptance, not automatic dependency discovery or publisher authentication.
+4. Apply within the current authorized scope, then verify. Regenerate plans, receipts and symlinks
+   on each target; do not transport a source host's absolute registrations or approvals.
+5. Start a fresh target Agent and verify catalog discovery, actual Skill/template reads and a
+   bounded useful operation. Require successful tool outputs, actual cwd/HEAD/origin and dependency
+   digests; catalog presence, a controller-side read or process exit alone is insufficient.
+6. For recovery, retain native inputs and fixed source objects outside the disposable delivery.
+   Record provider/container identity, prove old delivery absence, restore from the same lock,
+   compare content and executable bits, re-register and repeat actual Agent acceptance. Report
+   in-place rebuild and whole-instance replacement separately; preserve failed observations.
+
+Do not sync content behind an active registration. Create a new candidate and review its local
+activation. Already managed installations must use their existing lifecycle protocol; legacy
+integration must not bypass managed guards, renew revoked approval or relocate snapshots that
+still rely on repository-relative outer dependencies. Cross-host atomicity is not promised.
+Credentials, paid resources, capture, hooks and trust remain environment/operator responsibilities.
+Keep evidence private and clean up only owned temporary resources. The [cloud experiment](experiments/vendir-potology/CLOUD.md)
+records a real Codespaces replacement recovery and the unresolved in-place rebuild boundary.
 
 ### Manage approved versions and recover interrupted changes
 

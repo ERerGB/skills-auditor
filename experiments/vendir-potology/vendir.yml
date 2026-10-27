@@ -1,0 +1,9 @@
+apiVersion: vendir.k14s.io/v1alpha1
+kind: Config
+directories:
+- path: payload
+  contents:
+  - path: .
+    git:
+      url: file:///input/source.git
+      ref: origin/probe-main

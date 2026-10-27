@@ -8,6 +8,7 @@
     "schema_version": {"const": "skills-auditor-integration/v1"},
     "project_root": {"type": "string"},
     "metadata_platform": {"type": "string", "minLength": 1},
+    "required_files": {"type": "array", "items": {"type": "string", "minLength": 1}},
     "sources": {
       "type": "array",
       "minItems": 1,
