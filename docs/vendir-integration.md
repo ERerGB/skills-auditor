@@ -14,8 +14,8 @@ not an automatic or universal proof of dependency completeness.
 
 ## Reproduce on a target
 
-Prerequisites: vendir (tested with 0.46.3), this Auditor version, Git, and Potology's Linux/Python 3.12
-runtime with SQLite FTS5. Source access must already be available through the target's authorized
+Prerequisites: vendir (tested with 0.46.3), Skills Auditor 0.9.0 or later, Git, and a compatible
+Potology Linux/Python runtime with SQLite FTS5 (tested with Python 3.12 and 3.14). Source access must already be available through the target's authorized
 transport. The application does not install runtime tools, provision credentials, or move secrets.
 
 Copy the three example configuration files into a **new** deployment directory. Keep the directory
@@ -102,3 +102,23 @@ not read the skill. Use storage visible inside the target tools' filesystem name
 probe uses the temporary host's overlay filesystem, distinct from the ext4 source. No relaxation
 of the agent's isolation is necessary. The earlier two-container experiment separately verified
 ext4-to-tmpfs locked restore; those are different acceptance claims.
+
+## Environment acceptance and managed installations
+
+Resolve storage from inside the target Agent's tools, not just the provisioning shell. Verify
+catalog discovery, successful reads of the installed skill and its dependencies, and a bounded
+useful command with output evidence. Use explicit working directories and independent commands
+when a login shell can reset cwd. Preserve failed attempts; retry the affected acceptance without
+weakening its success conditions.
+
+For a rebuild, record the provider identity and container facts before and after, retain native
+inputs/source objects separately, and require old disposable delivery to be absent. Restore with
+the same lock, compare all required content and executable bits, generate fresh local registration,
+and repeat Agent acceptance. Whole-instance replacement and in-place rebuild are separate outcomes.
+Do not copy authentication as part of a skill package or assume old approval authorizes a new host.
+
+This example uses legacy integration into a fresh host root. Existing managed roots remain owned
+by the [managed lifecycle](managed-lifecycle.md); legacy writes fail at its boundary. Its snapshots
+are not a replacement for a complete repository layout: snapshotting task-handoff alone can break
+its outer relative dependencies. Do not claim `required_files` extends managed snapshots or that
+this recipe implements cross-host lifecycle transactions. Keep delivery and activation separate.
