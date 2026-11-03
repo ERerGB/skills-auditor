@@ -107,7 +107,7 @@ choices in user-facing names before asking for a target.
 
 ```bash
 skills-audit integrate \
-  --source .agents/skills \
+  --source canonical/skills \
   --target codex
 ```
 

@@ -47,8 +47,8 @@ skills-audit integrate --config skills-auditor.json \
 
 Current Codex loads repository skills from `.agents/skills` and follows symlinked skill folders
 ([official documentation](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills)).
-The legacy Auditor `--target codex` default remains `.codex/skills`; this recipe explicitly selects
-the native location. Use the target runtime's convention, and test a fresh agent session after
+Auditor `--target codex` now defaults to `.agents/skills`; the explicit override above also
+works with earlier Auditor releases that defaulted to `.codex/skills`. Use the target runtime's convention, and test a fresh agent session after
 registration. A successful Auditor receipt proves file and link state, not agent use.
 
 Cross-filesystem transfer happens in vendir. Symlinks are only the final **local** registration,

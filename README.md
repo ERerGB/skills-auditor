@@ -78,11 +78,12 @@ Then register the clone as `skills-auditor` through your host's normal skill dir
 global Codex installation:
 
 ```bash
-ln -s /absolute/path/to/skills-auditor ~/.codex/skills/skills-auditor
+mkdir -p ~/.agents/skills
+ln -s /absolute/path/to/skills-auditor ~/.agents/skills/skills-auditor
 ```
 
 Use `~/.cursor/skills` or `~/.claude/skills` for the corresponding host, or the project-scoped
-`.cursor/skills`, `.claude/skills`, or `.codex/skills` directory. Keep the whole clone together:
+`.cursor/skills`, `.claude/skills`, or `.agents/skills` directory. Keep the whole clone together:
 the root [`SKILL.md`](SKILL.md) composes the sub-skills, configuration, and CLI.
 
 After registration, return to chat and invoke `/skills-auditor`. See

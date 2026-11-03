@@ -62,7 +62,8 @@ BUILTIN_ENVIRONMENTS = NativeEnvironmentRegistry(
     (
         NativeEnvironment("cursor", (".cursor/skills",), (".cursor/skills",)),
         NativeEnvironment("claude-code", (".claude/skills",), (".claude/skills",)),
-        NativeEnvironment("codex", (".codex/skills",), (".codex/skills",)),
+        NativeEnvironment("codex", (".agents/skills", ".codex/skills"),
+                          (".agents/skills", ".codex/skills")),
     )
 )
 

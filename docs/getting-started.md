@@ -21,12 +21,12 @@ when using the agent skill, its preflight checks capture health before the reque
 
 ## Quickstart
 
-Assume canonical definitions live under `.agents/skills` and Codex should discover them from the
-project's `.codex/skills` root.
+Assume canonical definitions live under `canonical/skills` and Codex should discover them from the
+project's `.agents/skills` root.
 
 ```bash
 skills-audit integrate \
-  --source .agents/skills \
+  --source canonical/skills \
   --target codex \
   --plan-out .skills-auditor-local/plan.json
 
@@ -48,13 +48,13 @@ Targets are semantic host names, not raw install paths:
 
 ```bash
 skills-audit integrate \
-  --source .agents/skills \
+  --source canonical/skills \
   --target cursor \
   --target claude-code \
   --target codex
 ```
 
-Use `codex@global` for `~/.codex/skills`, or `--target-root acme=.acme/skills` for a custom host.
+Use `codex@global` for `~/.agents/skills`, or `--target-root acme=.acme/skills` for a custom host.
 
 ## Repository configuration
 

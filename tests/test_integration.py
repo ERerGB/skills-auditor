@@ -281,7 +281,7 @@ class TestIntegrationCore(IntegrationFixture):
     def test_named_environment_resolves_project_root(self) -> None:
         with tempfile.TemporaryDirectory() as base:
             project = Path(base)
-            source = project / ".agents" / "skills"
+            source = project / "canonical" / "skills"
             self.write_skill(source, "alpha")
             spec = IntegrationSpec(
                 project_root=project,
@@ -298,7 +298,7 @@ class TestIntegrationCore(IntegrationFixture):
                 [
                     str((project / ".cursor" / "skills").resolve(strict=False)),
                     str((project / ".claude" / "skills").resolve(strict=False)),
-                    str((project / ".codex" / "skills").resolve(strict=False)),
+                    str((project / ".agents" / "skills").resolve(strict=False)),
                 ],
             )
 
@@ -317,7 +317,7 @@ class TestIntegrationCore(IntegrationFixture):
                 plan = build_integration_plan(spec)
             self.assertEqual(
                 plan["targets"][0]["root"],
-                str((fake_home / ".codex" / "skills").resolve(strict=False)),
+                str((fake_home / ".agents" / "skills").resolve(strict=False)),
             )
 
     def test_target_inside_source_is_rejected(self) -> None:

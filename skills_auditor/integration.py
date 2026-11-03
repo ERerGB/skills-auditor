@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from skills_auditor.cli import (
+    SourceLinkError,
     collect_metadata_findings,
     directory_tree_hash,
     discover_sync_mapping,
@@ -540,6 +541,9 @@ def build_integration_plan(spec: IntegrationSpec) -> Dict[str, Any]:
                                    exit_code=EXIT_CONTRACT) from exc
     try:
         mapping = discover_sync_mapping(list(spec.sources))
+    except SourceLinkError as exc:
+        raise IntegrationError("source_link_unavailable", str(exc),
+                               exit_code=EXIT_CONTRACT) from exc
     except ValueError as exc:
         raise IntegrationError(
             "source_conflict",

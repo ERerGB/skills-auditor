@@ -6,7 +6,7 @@ diagnosis and maintenance.
 ## Integrate one source into one host
 
 ```bash
-skills-audit integrate --source .agents/skills --target codex
+skills-audit integrate --source canonical/skills --target codex
 ```
 
 The output contains the saved plan path and exact apply command.
@@ -22,7 +22,7 @@ skills-audit integrate
 
 ```bash
 skills-audit integrate \
-  --source .agents/skills \
+  --source canonical/skills \
   --target cursor@global \
   --target-root acme="$HOME/.acme/skills"
 ```
@@ -31,7 +31,7 @@ skills-audit integrate \
 
 ```bash
 skills-audit integrate \
-  --source .agents/skills \
+  --source canonical/skills \
   --target codex \
   --format json \
   --plan-out .skills-auditor-local/plan.json

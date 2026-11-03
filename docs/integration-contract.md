@@ -38,7 +38,7 @@ Repository configuration is optional. When `skills-auditor.json` exists in the c
 {
   "schema_version": "skills-auditor-integration/v1",
   "project_root": ".",
-  "sources": [".agents/skills"],
+  "sources": ["canonical/skills"],
   "targets": ["cursor", "claude-code", "codex"],
   "metadata_platform": "codex"
 }
@@ -60,8 +60,8 @@ Targets accept these forms:
 
 | Form | Meaning |
 | --- | --- |
-| `codex` | Built-in project root `.codex/skills` |
-| `codex@global` | Built-in global root `~/.codex/skills` |
+| `codex` | Built-in project root `.agents/skills` |
+| `codex@global` | Built-in global root `~/.agents/skills` |
 | `--target-root acme=.acme/skills` | Explicit custom environment root |
 | `{"environment":"acme","root":".acme/skills"}` | Custom root in the JSON spec |
 
@@ -70,10 +70,10 @@ source and target roots to be disjoint and rejects target roots that contain eac
 precise canonical source tree rather than asking the tool to install within a source or source from
 within an install namespace.
 
-The built-in `codex` roots above retain the legacy convention for compatibility. Current Codex
-uses `.agents/skills`; select `--target-root codex=/path/to/host/.agents/skills` explicitly for that
-runtime. The vendir recipe and live acceptance probe use this native location. Existing registrations
-are not automatically moved or duplicated.
+The built-in `codex` targets use native `.agents/skills` roots. Legacy `.codex/skills`
+roots remain discovery sources; existing registrations are not moved automatically. To deliberately
+install into a legacy root, use `--target-root codex=/path/to/.codex/skills`. Keep canonical
+sources outside the selected install root, for example under `canonical/skills`.
 
 Template: [`../config/skills-auditor.integration.example.json`](../config/skills-auditor.integration.example.json).
 
@@ -82,7 +82,7 @@ Template: [`../config/skills-auditor.integration.example.json`](../config/skills
 Create a plan directly:
 
 ```bash
-skills-audit integrate --source .agents/skills --target codex
+skills-audit integrate --source canonical/skills --target codex
 ```
 
 Or use repository configuration:

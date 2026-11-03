@@ -35,7 +35,7 @@ class TestEnvironmentLifecycle(unittest.TestCase):
         for environment in BUILTIN_ENVIRONMENTS.all():
             with self.subTest(environment=environment.key), tempfile.TemporaryDirectory() as base:
                 project = Path(base)
-                canonical_root = project / ".agents" / "skills"
+                canonical_root = project / "canonical" / "skills"
                 canonical = self.write_skill(canonical_root, "product-research", "canonical-v1")
                 install_root = environment.primary_project_root(project)
 
