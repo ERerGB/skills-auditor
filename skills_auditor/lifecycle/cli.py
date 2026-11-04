@@ -146,6 +146,7 @@ def configure(parser):
         plan.add_argument("--" + argument, type=Path)
     for argument in ("installation-id", "skill-id", "name", "version-id"):
         plan.add_argument("--" + argument)
+    plan.add_argument("--entrypoint", help="Normalized Skill directory relative to the whole source package.")
     apply = commands.add_parser("apply", help="Execute an exact saved plan with explicit approval.")
     apply.add_argument("plan", type=Path)
     apply.add_argument("--approve-plan-id")
@@ -363,7 +364,8 @@ def execute(arguments):
             legacy = _read_object(arguments.legacy_receipt) if arguments.legacy_receipt else None
             plan = manager.plan(arguments.operation, source=arguments.source, target=arguments.target,
                                 installation_id=arguments.installation_id, skill_id=arguments.skill_id,
-                                name=arguments.name, version_id=arguments.version_id, legacy_receipt=legacy)
+                                name=arguments.name, version_id=arguments.version_id, legacy_receipt=legacy,
+                                entrypoint=arguments.entrypoint)
             if arguments.plan_out:
                 _save_plan(manager, plan, arguments.plan_out)
             return plan, 0

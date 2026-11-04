@@ -14,7 +14,7 @@ python3 scripts/skills_audit.py --help
 Pass both sides explicitly:
 
 ```bash
-skills-audit integrate --source .agents/skills --target codex
+skills-audit integrate --source canonical/skills --target codex
 ```
 
 Or add `sources` and `targets` to a repository `skills-auditor.json`.
@@ -22,7 +22,7 @@ Or add `sources` and `targets` to a repository `skills-auditor.json`.
 ## Integrate reports `target_inside_source`
 
 The high-level transaction rejects a target contained by its canonical source root. Use a precise
-source such as `.agents/skills`, not the entire repository.
+source such as `canonical/skills`, outside the install root.
 
 `source_inside_target` is the inverse: a canonical source sits inside an install root and could be
 mistaken for an entry to replace. Move the canonical tree outside that namespace. If
@@ -152,3 +152,17 @@ compensation. Earlier pointer changes may already have occurred without a comple
 An old successful receipt is historical evidence, not a shortcut around a later invalidation
 or changed installation generation. A completed transaction requires a new inverse plan rather
 than unfinished-transaction compensation. See [managed recovery](managed-lifecycle.md#failure-and-recovery).
+
+## Skills disappear after copying a workspace to a container
+
+Absolute symlinks retain their original host paths. A link to `/Users/...` cannot be read on a
+Linux host unless that exact target exists there. Deliver the complete required source layout to
+the target first, then regenerate registrations and receipts there using the
+[locked delivery workflow](vendir-integration.md). Do not copy host registrations or receipts.
+
+`integrate` and `sync-discover` reject unavailable source links rather than silently omitting
+skills. `audit` reports broken install links and exits `3`; it cannot infer an authoritative
+replacement from a missing path. Use explicitly selected, target-local sources for repair.
+
+Verify both `skills/list` discovery and actual sandboxed reads of the skill and its dependencies.
+A successful file receipt alone does not prove that a running agent can use the skill.

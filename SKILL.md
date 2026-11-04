@@ -28,6 +28,7 @@ smallest safe workflow:
 | “Move or restore this Skill in another filesystem or cloud environment” | Follow native locked delivery and target-local acceptance |
 | “Keep approved bytes stable while I edit” or “Manage this installed version” | Use the managed lifecycle, preserving candidate/active separation |
 | “This managed Skill is warning or an update was interrupted” | Read status and transaction evidence before proposing recovery |
+| “Manage one baseline with project exceptions across environments” | Use workspace declarations and target-local managed plans |
 
 Do not lead with cycle names, flags, plan IDs, or schemas. First explain the
 observed state and intended result in the operator's language; show commands and
@@ -99,6 +100,28 @@ See [plugin installation and trust](docs/install.md#optional-skill-trace-plugin)
 
 ## Choose one path
 
+### Manage multiple workspaces and environments
+
+Follow [workspace management](docs/workspace-management.md) for a shared baseline
+with explicit project exceptions across local or existing SSH environments.
+Potology is an optional identity/route adapter, never a core dependency. Keep
+source definitions and exceptions in repository declarations; machine paths,
+connection references, snapshots and receipts belong to private runtime state.
+
+Read status, prepare `workspace plan`, and show source content IDs, workspace and
+platform targets, exceptions, migration scope and rollback versions. Apply only
+the exact reviewed plan with `--approve-plan-id`; then verify file integrity and
+native CLI loading separately. The user's explicit implementation/apply request
+can authorize that scoped execution; do not ask the same permission again.
+Unknown results require journal inspection before an explicitly approved resume.
+Preserve old readable entries and tracked repository changes until their explicit
+migration is reviewed. Do not treat filesystem checks as native client acceptance.
+Cursor acceptance covers Cursor CLI. Grok Build is an explicit `grok` host opt-in;
+use `workspace verify --native grok` for catalog/read evidence, preserving native
+login and folder trust. See [Grok Build](docs/grok-environments.md).
+Plugin packages, hooks, context and statistics
+are excluded from this workflow; do not flatten plugin-owned Skills into releases.
+
 ### Integrate canonical sources into hosts
 
 Prefer the high-level transaction for adoption and host registration. Infer the
@@ -107,7 +130,7 @@ choices in user-facing names before asking for a target.
 
 ```bash
 skills-audit integrate \
-  --source .agents/skills \
+  --source canonical/skills \
   --target codex
 ```
 

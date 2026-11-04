@@ -36,7 +36,7 @@ class InstalledCliFixture(unittest.TestCase):
             json.dumps(
                 {
                     "schema_version": "skills-auditor-integration/v1",
-                    "sources": [".agents/skills"],
+                    "sources": ["canonical/skills"],
                     "targets": targets,
                     "metadata_platform": "codex",
                 }
@@ -98,7 +98,7 @@ class TestInstalledCliLifecycle(InstalledCliFixture):
     def test_source_drift_renews_approval_only_after_explicit_noop_apply(self) -> None:
         with tempfile.TemporaryDirectory() as base:
             project = Path(base)
-            canonical = self.write_skill(project / ".agents" / "skills", "alpha")
+            canonical = self.write_skill(project / "canonical" / "skills", "alpha")
             payload = canonical / "payload.txt"
             payload.write_text("H1\n", encoding="utf-8")
             self.write_config(project, ["codex"])
@@ -136,7 +136,7 @@ class TestInstalledCliLifecycle(InstalledCliFixture):
             ):
                 self.assertIn(guidance, human.stdout)
 
-            entry = project / ".codex" / "skills" / "alpha"
+            entry = project / ".agents" / "skills" / "alpha"
             link_before = self.link_snapshot(entry)
             source_before = self.source_snapshot(canonical)
             receipts_before = {
@@ -190,7 +190,7 @@ class TestInstalledCliLifecycle(InstalledCliFixture):
     def test_stale_noop_plan_rejects_source_change_without_replacing_link_or_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as base:
             project = Path(base)
-            canonical = self.write_skill(project / ".agents" / "skills", "alpha")
+            canonical = self.write_skill(project / "canonical" / "skills", "alpha")
             payload = canonical / "payload.txt"
             payload.write_text("H1\n", encoding="utf-8")
             self.write_config(project, ["codex"])
@@ -211,7 +211,7 @@ class TestInstalledCliLifecycle(InstalledCliFixture):
             )
             self.assertEqual(renewal_plan["targets"][0]["actions"][0]["action"], "noop")
             payload.write_text("H3\n", encoding="utf-8")
-            entry = project / ".codex" / "skills" / "alpha"
+            entry = project / ".agents" / "skills" / "alpha"
             link_before = self.link_snapshot(entry)
             source_before = self.source_snapshot(canonical)
             rejected_receipt_path = project / "rejected-receipt.json"
@@ -255,7 +255,7 @@ class TestInstalledCliLifecycle(InstalledCliFixture):
             project.mkdir()
             home = Path(base) / "home"
             home.mkdir()
-            source = project / ".agents" / "skills"
+            source = project / "canonical" / "skills"
             canonical = self.write_skill(source, "alpha", "canonical-v1")
             targets = [
                 "cursor",
@@ -297,10 +297,10 @@ class TestInstalledCliLifecycle(InstalledCliFixture):
             expected_roots = (
                 project / ".cursor" / "skills",
                 project / ".claude" / "skills",
-                project / ".codex" / "skills",
+                project / ".agents" / "skills",
                 home / ".cursor" / "skills",
                 home / ".claude" / "skills",
-                home / ".codex" / "skills",
+                home / ".agents" / "skills",
             )
             for root in expected_roots:
                 with self.subTest(root=root):
@@ -346,7 +346,7 @@ class TestInstalledCliLifecycle(InstalledCliFixture):
     def test_stale_reviewed_plan_fails_before_any_target_write(self) -> None:
         with tempfile.TemporaryDirectory() as base:
             project = Path(base)
-            source = project / ".agents" / "skills"
+            source = project / "canonical" / "skills"
             canonical = self.write_skill(source, "alpha", "before")
             self.write_config(project, ["codex"])
             plan_path = project / "plan.json"
@@ -373,14 +373,14 @@ class TestInstalledCliLifecycle(InstalledCliFixture):
             )
             self.assertEqual(error["schema_version"], "skills-auditor-error/v1")
             self.assertEqual(error["error"]["code"], "stale_plan")
-            self.assertFalse((project / ".codex" / "skills" / "alpha").exists())
+            self.assertFalse((project / ".agents" / "skills" / "alpha").exists())
 
     def test_native_entry_is_archived_and_source_drift_breaks_verification(self) -> None:
         with tempfile.TemporaryDirectory() as base:
             project = Path(base)
-            source = project / ".agents" / "skills"
+            source = project / "canonical" / "skills"
             canonical = self.write_skill(source, "alpha", "canonical")
-            native = self.write_skill(project / ".codex" / "skills", "alpha", "native")
+            native = self.write_skill(project / ".agents" / "skills", "alpha", "native")
             self.write_config(project, ["codex"])
             plan_path = project / "plan.json"
             receipt_path = project / "receipt.json"

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from skills_auditor.cli import (
+    SourceLinkError,
     collect_metadata_findings,
     directory_tree_hash,
     discover_sync_mapping,
@@ -540,6 +541,9 @@ def build_integration_plan(spec: IntegrationSpec) -> Dict[str, Any]:
                                    exit_code=EXIT_CONTRACT) from exc
     try:
         mapping = discover_sync_mapping(list(spec.sources))
+    except SourceLinkError as exc:
+        raise IntegrationError("source_link_unavailable", str(exc),
+                               exit_code=EXIT_CONTRACT) from exc
     except ValueError as exc:
         raise IntegrationError(
             "source_conflict",
@@ -1365,8 +1369,15 @@ def validate_receipt(receipt: Dict[str, Any]) -> None:
             raise IntegrationError("invalid_receipt", "receipt archive_path must be absolute")
 
 
-def verify_receipt(receipt: Dict[str, Any]) -> Dict[str, Any]:
+def _receipt_checks(receipt: Dict[str, Any], results: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """Check original receipt evidence; a lifecycle child may select its exact entry.
+
+    This produces checks only, never a narrower receipt or approval. Public
+    receipt verification always checks the complete original result list.
+    """
     validate_receipt(receipt)
+    if results is not None and any(result not in receipt["results"] for result in results):
+        raise IntegrationError("invalid_receipt", "selected result is not original receipt evidence")
     checks: List[Dict[str, Any]] = _dependency_checks(receipt.get("dependencies", []))
     if receipt.get("status") != "completed":
         checks.append(
@@ -1377,7 +1388,7 @@ def verify_receipt(receipt: Dict[str, Any]) -> Dict[str, Any]:
             }
         )
 
-    for result in receipt["results"]:
+    for result in receipt["results"] if results is None else results:
         root = Path(str(result.get("root", "")))
         name = str(result.get("name", ""))
         entry = root / name
@@ -1420,6 +1431,11 @@ def verify_receipt(receipt: Dict[str, Any]) -> Dict[str, Any]:
             }
         )
 
+    return checks
+
+
+def verify_receipt(receipt: Dict[str, Any]) -> Dict[str, Any]:
+    checks = _receipt_checks(receipt)
     failed_reason_codes = list(
         dict.fromkeys(str(check["code"]) for check in checks if not check.get("ok"))
     )

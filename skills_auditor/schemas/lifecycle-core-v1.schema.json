@@ -91,6 +91,7 @@
         "parent_version_id": {"anyOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
         "source": {"$ref": "#/$defs/path"}, "created_at": {"$ref": "#/$defs/time"},
         "snapshot": {"$ref": "#/$defs/snapshot_descriptor"},
+        "entrypoint": {"type": "string", "minLength": 1, "description": "Optional normalized relative Skill directory inside the complete package snapshot; omitted for legacy root entries."},
         "provenance": {
           "type": "object", "additionalProperties": false,
           "required": ["operation", "legacy_receipt_id"],

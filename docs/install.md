@@ -34,8 +34,8 @@ Keep the repository checkout intact and link the whole directory as one skill. F
 register it globally in Codex:
 
 ```bash
-mkdir -p ~/.codex/skills
-ln -s /absolute/path/to/skills-auditor ~/.codex/skills/skills-auditor
+mkdir -p ~/.agents/skills
+ln -s /absolute/path/to/skills-auditor ~/.agents/skills/skills-auditor
 ```
 
 Choose the root that matches the host and desired scope:
@@ -44,7 +44,7 @@ Choose the root that matches the host and desired scope:
 | --- | --- | --- |
 | Cursor | `.cursor/skills` | `~/.cursor/skills` |
 | Claude Code | `.claude/skills` | `~/.claude/skills` |
-| Codex | `.codex/skills` | `~/.codex/skills` |
+| Codex | `.agents/skills` | `~/.agents/skills` |
 
 The destination `skills-auditor` entry must not already exist. Inspect an existing entry before
 replacing or relinking it. Once registered, start a new chat session if the host only discovers

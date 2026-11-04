@@ -38,6 +38,18 @@ def _identifier(value, label="identifier"):
     return value
 
 
+def version_entry(version):
+    """The selected skill directory, retaining the complete package snapshot."""
+    return str(Path(version["snapshot"]["path"]) / version.get("entrypoint", "."))
+
+
+def _entrypoint(value):
+    if (not isinstance(value, str) or not value or "\\" in value or any(ord(c) < 32 for c in value) or Path(value).is_absolute()
+            or ".." in Path(value).parts or str(Path(value)) != value):
+        raise LifecycleError("invalid_entrypoint", "Entrypoint must be a normalized relative skill directory.")
+    return value
+
+
 def _timestamp(value):
     if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})", value):
         raise ValueError("timezone-qualified timestamp required")
@@ -156,9 +168,10 @@ class Manager:
         return self._get("version", version_id)["data"]
 
     def plan(self, operation, *, source=None, target=None, installation_id=None,
-             skill_id=None, name=None, version_id=None, legacy_receipt=None):
+             skill_id=None, name=None, version_id=None, legacy_receipt=None, entrypoint=None):
         arguments = {"source": source, "target": target, "installation_id": installation_id,
-                     "skill_id": skill_id, "name": name, "version_id": version_id, "legacy_receipt": legacy_receipt}
+                     "skill_id": skill_id, "name": name, "version_id": version_id,
+                     "legacy_receipt": legacy_receipt, "entrypoint": entrypoint}
         if isinstance(operation, str) and operation in OPERATIONS - _CREATING - {"revoke"}:
             with self._inspection_context(installation_id) as (_, lock_error):
                 return self._plan_locked(operation, _lock_error=lock_error, **arguments)
@@ -176,11 +189,15 @@ class Manager:
         return self._build_plan(operation, _observation=observation, **arguments)
 
     def _build_plan(self, operation, *, source=None, target=None, installation_id=None,
-                    skill_id=None, name=None, version_id=None, legacy_receipt=None, _observation=None):
+                    skill_id=None, name=None, version_id=None, legacy_receipt=None, entrypoint=None, _observation=None):
         if not isinstance(operation, str) or operation not in OPERATIONS:
             raise LifecycleError("invalid_operation", "Unknown managed operation.")
         if legacy_receipt is not None and operation != "migrate":
             raise LifecycleError("invalid_plan", "Only migration accepts a legacy receipt.")
+        if entrypoint is not None:
+            _entrypoint(entrypoint)
+            if operation not in _NEW_VERSION:
+                raise LifecycleError("invalid_entrypoint", "Retained operations use their recorded entrypoint.")
         if name is not None and (not isinstance(name, str) or not name.strip() or len(name) > 200):
             raise LifecycleError("invalid_plan", "Name must be a nonempty bounded string.")
         new = operation in _CREATING
@@ -230,13 +247,18 @@ class Manager:
             if _overlap(source_path, self.state_root):
                 raise LifecycleError("unsafe_overlap", "Candidate source and managed state must be disjoint.")
             inspection = inspect_source(source_path)
-            version_id = digest({"skill_id": skill_id, **inspection})
+            selected_entry = entrypoint if entrypoint is not None else (self._version(before["version_id"]).get("entrypoint", ".") if before else ".")
+            if selected_entry != "." and not (source_path / selected_entry / "SKILL.md").is_file():
+                raise LifecycleError("invalid_entrypoint", "Package entrypoint must contain SKILL.md.")
+            selection = {"entrypoint": selected_entry} if selected_entry != "." else {}
+            version_id = digest({"skill_id": skill_id, **inspection, **selection})
             version = {
                 "version_id": version_id, "skill_id": skill_id,
                 "parent_version_id": before["version_id"] if before else None,
                 "source": str(source_path), "created_at": utc_now(),
                 "snapshot": {**inspection, "path": str(self.store_root / inspection["snapshot_tree_sha256"] / "tree")},
                 "provenance": {"operation": operation, "legacy_receipt_id": None},
+                **selection,
             }
             existing_version = self.repository.get("version", version_id)
             if existing_version:
@@ -281,7 +303,7 @@ class Manager:
 
         legacy = None
         if operation == "migrate":
-            legacy = self._legacy(legacy_receipt, source_path, target_path)
+            legacy = self._legacy(legacy_receipt, source_path / version.get("entrypoint", "."), target_path)
             if existing_version is None:
                 version["provenance"]["legacy_receipt_id"] = legacy["receipt_id"]
 
@@ -292,7 +314,7 @@ class Manager:
         after.update({"target": str(target_path), "version_id": version["version_id"],
                       "name": name or (before["name"] if before else skill["name"])})
         after["state"] = {"disable": "disabled", "archive": "archived", "uninstall": "uninstalled"}.get(operation, "active" if operation in _CREATING | {"enable"} else before["state"])
-        desired = {"kind": "symlink", "link": version["snapshot"]["path"]} if after["state"] == "active" else {"kind": "missing"}
+        desired = {"kind": "symlink", "link": version_entry(version)} if after["state"] == "active" else {"kind": "missing"}
         if operation == "revoke":
             desired = {key: value for key, value in observation.items() if key != "identity"}
         steps = [] if operation == "revoke" else [{"path": str(target_path), "parent_identity": _parent_identity(target_path), "before": observation, "after": desired}]
@@ -312,20 +334,26 @@ class Manager:
         plan["plan_id"] = digest(plan)
         return plan
 
-    def _legacy(self, receipt, source, target):
-        from ..integration import IntegrationError, verify_receipt
+    def _legacy(self, receipt, source, target, *, full=True):
+        from ..integration import IntegrationError, _receipt_checks, validate_receipt, verify_receipt
         if not isinstance(receipt, dict):
             raise LifecycleError("legacy_receipt_required", "Migration requires a complete legacy receipt object.")
         try:
-            result = verify_receipt(receipt)
+            validate_receipt(receipt)
+            matching = [item for item in receipt["results"]
+                        if item.get("expected_target") == str(source) and str(Path(item["root"]) / item["name"]) == str(target)]
+            if len(matching) != 1:
+                raise LifecycleError("legacy_mismatch", "Legacy receipt must bind this exact source and target once.")
+            # Planning admits the complete receipt. During application an
+            # earlier reviewed sibling may already have advanced its pointer.
+            # Keep original evidence intact and recheck this child's old entry,
+            # source hash and all common dependencies; step.before is checked
+            # separately before any pointer effect.
+            checks = verify_receipt(receipt)["checks"] if full else _receipt_checks(receipt, matching)
         except (IntegrationError, OSError, ValueError) as error:
             raise LifecycleError("legacy_invalid", "Legacy receipt cannot be validated.", details=_error(error)) from error
-        if result["status"] != "passed":
-            raise LifecycleError("legacy_invalid", "Only a currently clean legacy receipt can migrate.")
-        matching = [item for item in receipt["results"]
-                    if item.get("expected_target") == str(source) and str(Path(item["root"]) / item["name"]) == str(target)]
-        if not matching:
-            raise LifecycleError("legacy_mismatch", "Legacy receipt does not bind this exact source and target.")
+        if any(not check.get("ok") for check in checks):
+            raise LifecycleError("legacy_invalid", "Only currently clean legacy evidence can migrate.")
         return copy.deepcopy(receipt)
 
     def _owned_observation(self, installation, observation):
@@ -333,7 +361,7 @@ class Manager:
             expected = {"kind": "missing"}
         else:
             version = self._version(installation["version_id"])
-            expected = {"kind": "symlink", "link": version["snapshot"]["path"]}
+            expected = {"kind": "symlink", "link": version_entry(version)}
         if not _matches(observation, expected):
             raise LifecycleError("target_conflict", "Managed target no longer matches its owned pointer; investigate before changing it.",
                                  details={"path": installation["target"], "expected": expected,
@@ -375,9 +403,14 @@ class Manager:
             _identifier(plan["installation_id"])
             _identifier(plan["skill"]["skill_id"])
             _identifier(plan["version"]["version_id"])
-            if set(plan["skill"]) != {"skill_id", "name", "created_at"} or set(plan["version"]) != {"version_id", "skill_id", "parent_version_id", "source", "created_at", "snapshot", "provenance"}:
+            version_fields = {"version_id", "skill_id", "parent_version_id", "source", "created_at", "snapshot", "provenance"}
+            if set(plan["skill"]) != {"skill_id", "name", "created_at"} or set(plan["version"]) not in (version_fields, version_fields | {"entrypoint"}):
                 raise ValueError("identity fields")
             origin = plan["version"]
+            if "entrypoint" in origin:
+                _entrypoint(origin["entrypoint"])
+                if origin["entrypoint"] == ".":
+                    raise ValueError("default entrypoint must retain v1 identity")
             if not isinstance(origin["source"], str) or not Path(origin["source"]).is_absolute():
                 raise ValueError("version origin source")
             if origin["parent_version_id"] is not None and (not isinstance(origin["parent_version_id"], str) or not re.fullmatch(r"[a-f0-9]{64}", origin["parent_version_id"])):
@@ -440,6 +473,7 @@ class Manager:
             expected_path = str(self.store_root / snapshot["snapshot_tree_sha256"] / "tree")
             if not re.fullmatch(r"[a-f0-9]{64}", snapshot["snapshot_tree_sha256"]) or snapshot["path"] != expected_path:
                 raise ValueError("snapshot path")
+            expected_path = version_entry(plan["version"])
             if plan["source"]:
                 lexical_source = Path(plan["source"])
                 if (_overlap(lexical_source, self.state_root) or ".." in lexical_source.parts
@@ -449,12 +483,13 @@ class Manager:
             if (operation == "revoke" and plan["steps"] != []) or (operation != "revoke" and not 1 <= len(plan["steps"]) <= 2):
                 raise ValueError("steps")
             existing_version = self.repository.get("version", plan["version"]["version_id"])
-            expected_version_id = digest({"skill_id": plan["skill"]["skill_id"], **{key: value for key, value in snapshot.items() if key != "path"}})
+            selection = {"entrypoint": origin["entrypoint"]} if "entrypoint" in origin else {}
+            expected_version_id = digest({"skill_id": plan["skill"]["skill_id"], **{key: value for key, value in snapshot.items() if key != "path"}, **selection})
             if plan["version"]["version_id"] != expected_version_id:
                 raise ValueError("version content identity")
             same_origin = bool(existing_version and existing_version["data"] == plan["version"])
             if existing_version:
-                if any(existing_version["data"].get(key) != plan["version"][key] for key in ("version_id", "skill_id", "snapshot")):
+                if any(existing_version["data"].get(key) != plan["version"].get(key) for key in ("version_id", "skill_id", "snapshot", "entrypoint")):
                     raise ValueError("immutable version content changed")
                 if operation not in _NEW_VERSION and not same_origin:
                     raise ValueError("immutable retained version origin changed")
@@ -636,7 +671,7 @@ class Manager:
             if any(actual.get(key) != plan["version"]["snapshot"].get(key) for key in actual):
                 raise LifecycleError("stale_plan", "Candidate content changed after planning.")
         if targets and plan["legacy_receipt"]:
-            self._legacy(plan["legacy_receipt"], Path(plan["source"]), Path(plan["after"]["target"]))
+            self._legacy(plan["legacy_receipt"], Path(plan["source"]) / plan["version"].get("entrypoint", "."), Path(plan["after"]["target"]), full=False)
         if targets:
             for step in plan["steps"]:
                 if observation is not None and step["path"] == plan["before"]["target"]:

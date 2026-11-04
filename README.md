@@ -48,6 +48,7 @@ host does not expose slash commands, ask for the same workflow in natural langua
 | Resolve duplicate or variant skills | Relinks byte-identical definitions; keeps differing variants visible for routing |
 | Bring canonical skills to a workspace | Plans native links for Cursor, Claude Code, Codex, or an explicit custom root |
 | Keep approved bytes stable during edits | Managed installations expose approved snapshots while replacement candidates remain separate |
+| Manage a baseline across local and SSH workspaces | Plans fixed package releases plus explicit project exceptions, with target-local approval and recovery |
 | Recover an interrupted managed change | Records intent and step evidence for explicitly approved resume or compensation |
 | Investigate a managed warning | Links persistent incidents, bounded evidence and append-only notes to resolution proof |
 | Leave a checkable result | Produces plans, receipts, route traces, verification results, and optional run ledgers |
@@ -59,6 +60,11 @@ replacement, and never infer permission to delete.
 Choose [managed lifecycle](docs/managed-lifecycle.md) when you need version selection, durable
 revocation and recoverable transactions. Existing live-link integrations remain compatible;
 migration is explicit.
+
+Use [multi-workspace management](docs/workspace-management.md) for local or existing
+SSH environments, with optional Potology routing and Codex, Cursor CLI, Claude
+Code and explicit [Grok Build](docs/grok-environments.md) registrations. Repository declarations stay portable; machine bindings and
+execution evidence stay private. Plugin environment management is deferred.
 
 ## Install and start
 
@@ -78,11 +84,12 @@ Then register the clone as `skills-auditor` through your host's normal skill dir
 global Codex installation:
 
 ```bash
-ln -s /absolute/path/to/skills-auditor ~/.codex/skills/skills-auditor
+mkdir -p ~/.agents/skills
+ln -s /absolute/path/to/skills-auditor ~/.agents/skills/skills-auditor
 ```
 
 Use `~/.cursor/skills` or `~/.claude/skills` for the corresponding host, or the project-scoped
-`.cursor/skills`, `.claude/skills`, or `.codex/skills` directory. Keep the whole clone together:
+`.cursor/skills`, `.claude/skills`, or `.agents/skills` directory. Keep the whole clone together:
 the root [`SKILL.md`](SKILL.md) composes the sub-skills, configuration, and CLI.
 
 After registration, return to chat and invoke `/skills-auditor`. See

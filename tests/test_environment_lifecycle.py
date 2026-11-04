@@ -35,7 +35,7 @@ class TestEnvironmentLifecycle(unittest.TestCase):
         for environment in BUILTIN_ENVIRONMENTS.all():
             with self.subTest(environment=environment.key), tempfile.TemporaryDirectory() as base:
                 project = Path(base)
-                canonical_root = project / ".agents" / "skills"
+                canonical_root = project / "canonical" / "skills"
                 canonical = self.write_skill(canonical_root, "product-research", "canonical-v1")
                 install_root = environment.primary_project_root(project)
 
@@ -96,4 +96,4 @@ class TestEnvironmentLifecycle(unittest.TestCase):
             self.assertEqual((install_root / "product-research").resolve(), canonical.resolve())
             self.assertEqual([a.action for a in plan_sync(install_root, mapping)], ["noop"])
 
-        self.assertEqual(len(registry.all()), 4)
+        self.assertEqual(len(registry.all()), len(BUILTIN_ENVIRONMENTS.all()) + 1)

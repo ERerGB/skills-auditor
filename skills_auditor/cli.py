@@ -231,8 +231,12 @@ def scan_skills(skills_dir: Path) -> List[EntryStatus]:
         name = entry.name
         if entry.is_symlink():
             raw_target = os.readlink(entry)
-            resolved = (entry.parent / raw_target).resolve()
-            is_ok = resolved.exists()
+            try:
+                resolved = entry.resolve(strict=True)
+                is_ok = True
+            except (OSError, RuntimeError):
+                resolved = Path(os.path.abspath(entry.parent / raw_target))
+                is_ok = False
             has_skill = (resolved / "SKILL.md").exists() if is_ok else False
             items.append(
                 EntryStatus(
@@ -1734,6 +1738,21 @@ def skill_alias_for_install_root(logical_name: str) -> str:
     return alias
 
 
+class SourceLinkError(ValueError):
+    """A source registration cannot be read on the current filesystem."""
+
+
+def _check_source_link(path: Path) -> None:
+    if path.is_symlink():
+        try:
+            path.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise SourceLinkError(
+                f"Source link unavailable: {path} -> {os.readlink(path)}; "
+                "deliver the source on this host and regenerate its local registration"
+            ) from exc
+
+
 def _walk_skill_dirs(source_root: Path) -> List[Path]:
     """Recursively find directories containing SKILL.md under one source root.
 
@@ -1741,6 +1760,7 @@ def _walk_skill_dirs(source_root: Path) -> List[Path]:
     symlinks so those installed entries can be replicated into other agent
     environments, while tracking resolved directories to avoid cycles.
     """
+    _check_source_link(source_root)
     if not source_root.exists() or not source_root.is_dir():
         return []
 
@@ -1765,8 +1785,9 @@ def _walk_skill_dirs(source_root: Path) -> List[Path]:
         except OSError:
             return
         for entry in entries:
-            if entry.name in _IGNORE_SKILL_SCAN_SEGMENTS:
+            if entry.name in _IGNORE_SKILL_SCAN_SEGMENTS or entry.name == ".skills-auditor-local":
                 continue
+            _check_source_link(entry)
             try:
                 if not entry.is_dir():
                     continue
@@ -1797,6 +1818,7 @@ def discover_sync_mapping(
 
     for source in sources:
         source_root = source.expanduser()
+        _check_source_link(source_root)
         if not source_root.exists():
             continue
         for skill_root in _walk_skill_dirs(source_root):
@@ -1835,7 +1857,7 @@ def discover_sync_mapping(
 
 def default_sync_discover_sources(include_global_sources: bool) -> List[Path]:
     cwd = Path.cwd()
-    sources = [cwd / ".agents" / "skills", *builtin_project_skill_roots(cwd)]
+    sources = list(builtin_project_skill_roots(cwd))
     if include_global_sources:
         home = Path("~").expanduser()
         sources.extend(
@@ -2156,6 +2178,7 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("workspace", help="Manage Skills across local and SSH workspaces; use workspace --help.")
     from skills_auditor.lifecycle.cli import register as register_lifecycle
     register_lifecycle(sub)
 
@@ -2184,7 +2207,7 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
         "--target",
         action="append",
         default=[],
-        help="Named host target, optionally @global (cursor, claude-code, codex). Repeatable.",
+        help="Named host target, optionally @global (cursor, claude-code, codex, grok). Repeatable.",
     )
     p_integrate.add_argument(
         "--target-root",
@@ -2777,6 +2800,9 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
 
 
 def _main(prog: Optional[str] = None) -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "workspace":
+        from skills_auditor.workspace.cli import main as workspace_main
+        return workspace_main(sys.argv[2:], prog=(prog or "skills-audit") + " workspace")
     if len(sys.argv) > 1 and sys.argv[1] == "lifecycle":
         from skills_auditor.lifecycle.cli import main as lifecycle_main
         return lifecycle_main(sys.argv[2:], prog=(prog or "skills-audit") + " lifecycle")
@@ -2929,11 +2955,13 @@ def _main(prog: Optional[str] = None) -> int:
     if args.command == "audit":
         duplicate_exit = False
         metadata_exit = False
+        broken_exit = False
         for idx, skills_dir in enumerate(resolve_skills_dirs(args.skills_dirs)):
             if idx > 0:
                 print()
             print(f"skills-dir: {skills_dir}")
             statuses = scan_skills(skills_dir)
+            broken_exit = broken_exit or any(s.link_status == "broken" for s in statuses)
             drift_map: Optional[Dict[str, DriftStatus]] = None
             if args.with_drift:
                 drift_map = {}
@@ -2958,6 +2986,8 @@ def _main(prog: Optional[str] = None) -> int:
             return 5
         if args.fail_on_duplicate_names and duplicate_exit:
             return 4
+        if broken_exit:
+            return 3
         return 0
 
     if args.command == "metadata":

@@ -7,6 +7,7 @@ host can participate by supplying another ``NativeEnvironment`` descriptor.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
 
@@ -16,11 +17,17 @@ class NativeEnvironment:
     key: str
     project_skill_roots: Tuple[str, ...]
     global_skill_roots: Tuple[str, ...]
+    global_home_variable: str = ""
 
     def project_roots(self, project_root: Path) -> Tuple[Path, ...]:
         return tuple(project_root / relative for relative in self.project_skill_roots)
 
     def global_roots(self, home: Path) -> Tuple[Path, ...]:
+        if self.global_home_variable and os.environ.get(self.global_home_variable):
+            custom = Path(os.environ[self.global_home_variable]).expanduser()
+            if not custom.is_absolute():
+                raise ValueError(f"{self.global_home_variable} must be an absolute owner-local path")
+            return (custom / "skills", *(home / relative for relative in self.global_skill_roots[1:]))
         return tuple(home / relative for relative in self.global_skill_roots)
 
     def primary_project_root(self, project_root: Path) -> Path:
@@ -62,7 +69,9 @@ BUILTIN_ENVIRONMENTS = NativeEnvironmentRegistry(
     (
         NativeEnvironment("cursor", (".cursor/skills",), (".cursor/skills",)),
         NativeEnvironment("claude-code", (".claude/skills",), (".claude/skills",)),
-        NativeEnvironment("codex", (".codex/skills",), (".codex/skills",)),
+        NativeEnvironment("codex", (".agents/skills", ".codex/skills"),
+                          (".agents/skills", ".codex/skills")),
+        NativeEnvironment("grok", (".grok/skills",), (".grok/skills",), "GROK_HOME"),
     )
 )
 

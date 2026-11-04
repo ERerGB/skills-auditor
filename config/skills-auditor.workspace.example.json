@@ -1,0 +1,24 @@
+{
+  "schema_version": "skills-auditor-workspace-declaration/v1",
+  "platforms": ["codex", "cursor", "claude-code"],
+  "sources": {
+    "baseline": {
+      "kind": "git",
+      "repository": "https://github.com/example/skills.git",
+      "commit": "0000000000000000000000000000000000000000",
+      "include": ["skills", "scripts", "templates"],
+      "required_files": ["scripts/check.py", "templates/report.md"],
+      "entries": {"review": "skills/review"},
+      "platforms": ["codex", "cursor", "claude-code"]
+    },
+    "project": {
+      "kind": "local",
+      "include": ["skills", "templates"],
+      "required_files": ["templates/report.md"],
+      "entries": {"review": "skills/review"},
+      "platforms": ["codex", "cursor", "claude-code"]
+    }
+  },
+  "baseline": ["baseline"],
+  "overrides": {"review": {"source": "project", "entry": "skills/review"}}
+}
