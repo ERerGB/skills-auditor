@@ -13,7 +13,7 @@ from pathlib import Path
 from ..cli import _IGNORE_SKILL_SCAN_SEGMENTS, parse_skill_name, skill_alias_for_install_root
 from ..environments import BUILTIN_ENVIRONMENTS
 from ..lifecycle.common import LifecycleError, canonical_entry, path_components, paths_overlap
-from ..lifecycle.engine import Manager
+from ..lifecycle.engine import Manager, version_entry
 from ..lifecycle.locking import locked_paths
 from ..lifecycle.snapshots import inspect_source
 from .common import (DEFAULT_PLATFORMS, PREFIX, atomic_json, checked, declaration, digest, fail, fields,
@@ -141,10 +141,53 @@ class Node:
             observations = selected["configurations"]
         return {"roots": list(dict.fromkeys(map(str, roots))), "configurations": observations}
 
-    def _conflicts(self, workspace, desired, *, inventory=False):
+    def _conflicts(self, workspace, desired, *, inventory=False, pending=(), published=()):
         findings = []
         selected_targets = {str(canonical_entry(d["target"])) for d in desired}
         wanted = {d["name"] for d in desired}
+        # Only current owned pointers can establish that a nested discovery is
+        # another view of an already selected immutable entry. Resolving every
+        # native pointer would hide independently addressed foreign aliases.
+        owned, selected_entries = {}, {}
+        workspaces = self._workspaces()
+        manager = Manager(self.root / "managed", create=False)
+        try:
+            for record in manager.repository.list("workspace_installation"):
+                mapping = record["data"]
+                if workspaces.get(mapping["workspace"]) != workspace:
+                    continue
+                installation = manager.get_installation(mapping["installation_id"])
+                target = Path(installation["target"])
+                key = str(canonical_entry(target))
+                if installation["state"] != "active" or key not in selected_targets:
+                    continue
+                version = manager.repository.get("version", installation["version_id"])["data"]
+                if target.is_symlink() and os.readlink(target) == version_entry(version):
+                    try:
+                        owned[key] = target.resolve(strict=True)
+                    except (OSError, RuntimeError):
+                        continue
+                    selected_entries.setdefault(mapping["name"], set()).add(owned[key])
+            # A completed parent can expose the reviewed next nested entry
+            # before its flat sibling advances. Only explicit execution/recovery
+            # supplies pending saved child plans; final discovery stays strict.
+            selected_names = {str(canonical_entry(d["target"])): d["name"] for d in desired}
+            for child in pending:
+                core = child["plan"]
+                key = str(canonical_entry(core["after"]["target"]))
+                if (core["after"]["state"] != "active" or selected_names.get(key) != child["name"]
+                        or workspaces.get(child["workspace"]) != workspace):
+                    continue
+                manager._validate_plan(core, physical_paths=False, resolve_source=False)
+                try:
+                    future = Path(version_entry(core["version"])).resolve(strict=True)
+                except (OSError, RuntimeError):
+                    continue
+                selected_entries.setdefault(child["name"], set()).add(future)
+                if key in published:
+                    owned[key] = future
+        finally:
+            manager.repository.close()
         for root in self._roots(workspace):
             if root.is_symlink() and not root.exists():
                 findings.append({"code": "workspace_broken_root", "path": str(root)})
@@ -163,16 +206,22 @@ class Node:
                 if resolved in ancestors or not folder.is_dir():
                     return
                 if (folder / "SKILL.md").is_file():
-                    yield folder
+                    yield folder, resolved
                 for item in folder.iterdir():
                     if item.name not in IGNORED | _IGNORE_SKILL_SCAN_SEGMENTS and not item.name.startswith(".") and (item.is_dir() or item.is_symlink()):
                         yield from visible(item, ancestors | {resolved})
 
-            for entry in visible(root, set()):
+            for entry, resolved in visible(root, set()):
                 if str(canonical_entry(entry)) in selected_targets:
                     continue
                 md = entry / "SKILL.md"
                 name = skill_alias_for_install_root(parse_skill_name(md))
+                if resolved in selected_entries.get(name, ()) and any(
+                    str(canonical_entry(parent)) in owned
+                    and resolved.is_relative_to(owned[str(canonical_entry(parent))])
+                    for parent in entry.parents if parent.name
+                ):
+                    continue
                 if inventory:
                     findings.append({"name": name, "path": str(entry), "kind": "symlink" if entry.is_symlink() else "directory",
                                      "verification": "unverified", "migration": "explicit_review_required"})
@@ -384,12 +433,50 @@ class Node:
         finally:
             manager.repository.close()
 
+    def _published_inflight(self, plan, journal, manager):
+        """Recognize a published pointer before core/workspace metadata commits.
+
+        This is discovery evidence only. The existing Manager recovery still
+        checks and commits the exact transaction before another child advances.
+        """
+        flight = journal.get("in_flight")
+        if not flight or flight.get("index") != len(journal["results"]):
+            return set()
+        index = flight["index"]
+        if not 0 <= index < len(plan["children"]):
+            return set()
+        transaction_id = "workspace-" + digest([plan["plan_id"], index])[:48]
+        core = plan["children"][index]["plan"]
+        record = manager.repository.get("transaction", transaction_id)
+        if flight.get("transaction_id") != transaction_id or not record:
+            return set()
+        tx = record["data"]
+        if (tx["plan"] != core or tx["approved_plan_id"] != core["plan_id"]
+                or tx["transaction_id"] != transaction_id or not tx["snapshot_ready"]
+                or tx["state"] not in {"applying", "recovery_needed", "completed"}
+                or core["after"]["state"] != "active" or len(core["steps"]) != 1
+                or len(tx["steps"]) != 1):
+            return set()
+        manager._validate_plan(core, physical_paths=False, resolve_source=False)
+        step, reviewed = tx["steps"][0], core["steps"][0]
+        target = Path(reviewed["path"])
+        if (set(step) != set(reviewed) | {"state"} or step["state"] not in {"intent", "completed"}
+                or any(step[key] != value for key, value in reviewed.items())
+                or str(canonical_entry(target)) != reviewed["path"]
+                or [target.parent.stat().st_dev, target.parent.stat().st_ino] != reviewed["parent_identity"]
+                or reviewed["after"] != {"kind": "symlink", "link": version_entry(core["version"])}
+                or not target.is_symlink() or os.readlink(target) != reviewed["after"]["link"]):
+            return set()
+        return {str(canonical_entry(target))}
+
     def _execute(self, plan, journal, path, manager):
         try:
             # Both first application and explicit resume pass this boundary.
             # Completed siblings remain selected owned targets; a new shadow
             # must stop before any pending installation advances.
-            if self._conflicts(plan["workspace_binding"], plan["desired"]):
+            if self._conflicts(plan["workspace_binding"], plan["desired"],
+                               pending=plan["children"][len(journal["results"]):],
+                               published=self._published_inflight(plan, journal, manager)):
                 fail("workspace_stale", "Native discovery roots changed before pending activation.")
             for expected in plan["expectations"]:
                 if not any(c["plan"]["installation_id"] == expected["installation_id"] for c in plan["children"]):

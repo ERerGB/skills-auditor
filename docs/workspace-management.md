@@ -135,6 +135,11 @@ checked for same-name entries, including nested packs and broken shadows. A
 separate pointer to equal content is still an independently addressed installation
 and requires an explicit migration decision. Native precedence never silently
 chooses between different copies. Unsupported source/platform combinations block.
+An entry discovered inside a selected, currently owned package is the same entry
+as its selected flat alias only when both resolve to that exact immutable
+directory. Independent user or project pointers still require migration, even
+when they resolve to the same snapshot. This distinction also applies during
+explicit recovery of a partial workspace transaction.
 `status` includes unmanaged native entries as `legacy_installations`, explicitly
 marked unverified and requiring migration review; inventory never adopts them.
 
