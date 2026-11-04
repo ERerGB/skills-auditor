@@ -15,7 +15,7 @@ from ..lifecycle.common import LifecycleError, canonical_entry, path_components,
 from ..lifecycle.engine import Manager
 from ..lifecycle.locking import locked_paths
 from ..lifecycle.snapshots import inspect_source
-from .common import (PREFIX, atomic_json, checked, declaration, digest, fail, fields,
+from .common import (DEFAULT_PLATFORMS, PREFIX, atomic_json, checked, declaration, digest, fail, fields,
                      fingerprint, identifier, platforms, read_json, seal, utc_now)
 from .sources import IGNORED, stage
 
@@ -57,7 +57,7 @@ class Node:
         path = Path(request["path"]).resolve()
         if not path.is_dir() or path == path.parent or path == Path.home().resolve() or paths_overlap(path, self.root):
             fail("workspace_path", "Workspace must exist and remain disjoint from runtime state.")
-        selected = platforms(request.get("platforms", ["codex", "cursor", "claude-code"]))
+        selected = platforms(request.get("platforms", list(DEFAULT_PLATFORMS)))
         roots = {}
         for platform in selected:
             root = BUILTIN_ENVIRONMENTS.get(platform).primary_project_root(path)
@@ -68,7 +68,11 @@ class Node:
         value = {"path": str(path), "path_identity": [path.stat().st_dev, path.stat().st_ino],
                  "platforms": selected, "roots": roots}
         if name in workspaces and workspaces[name] != value:
-            fail("workspace_registration", "Workspace identity is already bound differently.")
+            previous = workspaces[name]
+            if (previous["path"] != value["path"] or previous["path_identity"] != value["path_identity"]
+                    or not set(previous["platforms"]) <= set(selected)
+                    or any(roots.get(key) != root for key, root in previous["roots"].items())):
+                fail("workspace_registration", "Workspace identity is already bound differently; registration only adds platforms.")
         # Registration is an explicit setup operation, not a plan/apply shortcut.
         # Empty native parent directories contain no activated Skill bytes.
         for root in roots.values():
@@ -88,9 +92,16 @@ class Node:
                 if r["data"]["workspace"] == workspace]
 
     def _roots(self, workspace):
+        return [Path(root) for root in self._discovery(workspace)["roots"]]
+
+    def _discovery(self, workspace):
         path = Path(workspace["path"])
-        roots = [path / p for p in (".agents/skills", ".codex/skills", ".cursor/skills", ".claude/skills")]
-        roots += [Path.home() / p for p in (".agents/skills", ".codex/skills", ".cursor/skills", ".claude/skills")]
+        native_roots = (".agents/skills", ".codex/skills", ".cursor/skills", ".claude/skills")
+        if "grok" in workspace["platforms"]:
+            native_roots += (".grok/skills",)
+        roots = [path / p for p in native_roots]
+        roots += [Path.home() / p for p in native_roots if p != ".grok/skills"]
+        project_directories = [path]
         # Parent repository roots participate in native discovery too.
         parent = path
         while not (parent / ".git").exists() and parent.parent != parent:
@@ -98,11 +109,23 @@ class Node:
         if (parent / ".git").exists():
             current = path.parent
             while current != parent.parent and current != current.parent:
-                roots += [current / p for p in (".agents/skills", ".codex/skills", ".cursor/skills", ".claude/skills")]
+                roots += [current / p for p in native_roots]
+                project_directories.append(current)
                 if current == parent:
                     break
                 current = current.parent
-        return list(dict.fromkeys(roots))
+        observations = []
+        if "grok" in workspace["platforms"]:
+            from .grok import configuration
+            try:
+                global_root = BUILTIN_ENVIRONMENTS.get("grok").primary_global_root(Path.home())
+            except ValueError as error:
+                fail("workspace_grok_config", str(error))
+            roots.append(global_root)
+            selected = configuration(global_root.parent, project_directories)
+            roots.extend(selected["roots"])
+            observations = selected["configurations"]
+        return {"roots": list(dict.fromkeys(map(str, roots))), "configurations": observations}
 
     def _conflicts(self, workspace, desired, *, inventory=False):
         findings = []
@@ -254,6 +277,7 @@ class Node:
                 "workspace": workspace_id, "workspace_binding": workspace, "declaration": declared,
                 "created_at": utc_now(), "actions": actions, "children": children,
                 "expectations": expectations, "desired": desired, "findings": findings,
+                **({"discovery": self._discovery(workspace)} if "grok" in workspace["platforms"] else {}),
                 "status": "blocked" if findings else "planned",
                 "summary": {"changes": len(children), "unchanged": sum(a["action"] == "noop" for a in actions)}}, "plan_id")
             atomic_json(self.root / "plans" / (result["plan_id"] + ".json"), result)
@@ -284,6 +308,8 @@ class Node:
         self._binding(request)
         if plan["binding"] != read_json(self.binding_path) or plan["workspace_binding"] != self._workspace(plan["workspace"]):
             fail("workspace_generation", "Plan is bound to a different environment/workspace generation.")
+        if "discovery" in plan and plan["discovery"] != self._discovery(plan["workspace_binding"]):
+            fail("workspace_stale", "Native Skill roots or Grok configuration changed after review.")
         if plan["status"] != "planned" or plan["findings"]:
             fail("workspace_blocked", "Resolve all plan findings before activation.", findings=plan["findings"])
         saved = self.root / "plans" / (plan["plan_id"] + ".json")
@@ -438,9 +464,19 @@ class Node:
             active = {i["installation_id"]: {key: i[key] for key in ("version_id", "generation", "target")}
                       for r in records for i in [manager.get_installation(r["installation_id"]) ] if i["state"] == "active"}
             view_matches = bool(view) and view["data"]["installations"] == active
+            native = {}
+            if request.get("native_platforms"):
+                if request["native_platforms"] != ["grok"] or "grok" not in workspace["platforms"]:
+                    fail("workspace_platform", "Register Grok Build before requesting its native verification.")
+                from .grok import inspect_native
+                expected = [{"name": r["name"], "target": manager.get_installation(r["installation_id"])["target"]}
+                            for r in records if r["platform"] == "grok"
+                            and manager.get_installation(r["installation_id"])["state"] == "active"]
+                native["grok"] = inspect_native(workspace["path"], expected)
             return {"binding": binding, "workspace": request["workspace"], "results": results,
-                    "valid": view_matches and all(r["valid"] for r in results if r["state"] == "active") and not conflicts,
-                    "findings": conflicts, "native_discovery": "unverified", "observed_at": utc_now()}
+                    "valid": view_matches and all(r["valid"] for r in results if r["state"] == "active") and not conflicts
+                             and all(r["valid"] for r in native.values()),
+                    "findings": conflicts, "native_discovery": native or "unverified", "observed_at": utc_now()}
         finally:
             manager.repository.close()
 
@@ -471,6 +507,7 @@ class Node:
             result = seal({"schema_version": PREFIX + "node-plan/v1", "binding": read_json(self.binding_path),
                 "workspace": old["workspace"], "workspace_binding": workspace, "declaration": old["declaration"],
                 "created_at": utc_now(), "children": children, "actions": actions, "desired": [],
+                **({"discovery": self._discovery(workspace)} if "grok" in workspace["platforms"] else {}),
                 "expectations": [], "findings": [], "status": "planned",
                 "summary": {"changes": len(children), "unchanged": 0}}, "plan_id")
             atomic_json(self.root / "plans" / (result["plan_id"] + ".json"), result)
@@ -494,11 +531,11 @@ class Node:
                 "installations": installations,
                 "legacy_installations": legacy,
                 "clients": {"codex": bool(shutil.which("codex")), "cursor": bool(shutil.which("cursor-agent")),
-                            "claude-code": bool(shutil.which("claude"))}}
+                            "claude-code": bool(shutil.which("claude")), "grok": bool(shutil.which("grok"))}}
 
     def dispatch(self, request):
         fields(request, {"method", "environment", "generation"},
-               {"state_dir", "workspace", "path", "platforms", "declaration", "packets", "plan", "approve_plan_id", "mode", "legacy_receipts"})
+               {"state_dir", "workspace", "path", "platforms", "declaration", "packets", "plan", "approve_plan_id", "mode", "legacy_receipts", "native_platforms"})
         identifier(request["environment"])
         identifier(request["generation"])
         methods = {"register": self.register, "inspect": self.inspect, "plan": self.plan, "apply": self.apply,

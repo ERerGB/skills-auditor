@@ -116,7 +116,10 @@ can authorize that scoped execution; do not ask the same permission again.
 Unknown results require journal inspection before an explicitly approved resume.
 Preserve old readable entries and tracked repository changes until their explicit
 migration is reviewed. Do not treat filesystem checks as native client acceptance.
-Cursor acceptance covers Cursor CLI. Plugin packages, hooks, context and statistics
+Cursor acceptance covers Cursor CLI. Grok Build is an explicit `grok` host opt-in;
+use `workspace verify --native grok` for catalog/read evidence, preserving native
+login and folder trust. See [Grok Build](docs/grok-environments.md).
+Plugin packages, hooks, context and statistics
 are excluded from this workflow; do not flatten plugin-owned Skills into releases.
 
 ### Integrate canonical sources into hosts

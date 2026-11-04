@@ -8,7 +8,8 @@ from pathlib import Path, PurePosixPath
 from ..lifecycle.common import LifecycleError, atomic_json, digest, utc_now
 
 PREFIX = "skills-auditor-workspace-"
-PLATFORMS = ("codex", "cursor", "claude-code")
+DEFAULT_PLATFORMS = ("codex", "cursor", "claude-code")
+PLATFORMS = (*DEFAULT_PLATFORMS, "grok")
 MAX_BYTES = 64 * 1024 * 1024
 
 
@@ -99,7 +100,7 @@ def declaration(value):
     for name, spec in value.get("sources", {}).items():
         identifier(name)
         source_spec(spec)
-    platforms(value.get("platforms", list(PLATFORMS)))
+    platforms(value.get("platforms", list(DEFAULT_PLATFORMS)))
     overrides = value.get("overrides", {})
     if not isinstance(overrides, dict):
         fail("workspace_input", "Project overrides must be an object.")

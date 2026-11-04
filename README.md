@@ -62,8 +62,8 @@ revocation and recoverable transactions. Existing live-link integrations remain 
 migration is explicit.
 
 Use [multi-workspace management](docs/workspace-management.md) for local or existing
-SSH environments, with optional Potology routing and Codex, Cursor CLI and Claude
-Code registrations. Repository declarations stay portable; machine bindings and
+SSH environments, with optional Potology routing and Codex, Cursor CLI, Claude
+Code and explicit [Grok Build](docs/grok-environments.md) registrations. Repository declarations stay portable; machine bindings and
 execution evidence stay private. Plugin environment management is deferred.
 
 ## Install and start

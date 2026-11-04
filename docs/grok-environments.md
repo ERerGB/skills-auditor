@@ -1,15 +1,15 @@
-# Grok environment ownership and integration proposal
+# Grok Build Skill host
 
 Research checked against official documentation on 2026-11-04. This document
-records the proposed integration boundary; it does not enroll a cloud computer,
-install Grok, publish private skills or claim native acceptance.
+records the implemented Grok Build CLI integration. Grok Bot cloud enrollment,
+plugin distribution and native login/trust remain outside this iteration.
 
 ## Product identity is separate from the execution environment
 
 | Surface | Auditor classification | Relevant boundary |
 | --- | --- | --- |
 | A Grok model selected in Cursor CLI | Existing `cursor` Skill host, with a model choice | A model change does not create a new machine, workspace or installation |
-| Grok Build CLI | Proposed independent `grok` Skill host | Native `.grok/skills`, its own configuration and native discovery |
+| Grok Build CLI | Independent `grok` Skill host | Native `.grok/skills`, its own configuration and native discovery |
 | Grok Bot | Remote execution environment plus Bot identity | The account's cloud computer owns filesystem state; several Bots share it |
 
 The [Cursor Grok page](https://cursor.com/grok) confirms that Grok models are
@@ -50,19 +50,82 @@ contract. The existing target-local workflow can run inside a verified cloud
 terminal; controller-driven delivery requires an actual supported route. Do not
 add a nominal `grok-bot` provider that cannot execute or verify operations.
 
-## Proposed implementation sequence
+## Enable Grok Build explicitly
 
-1. Confirm whether the requested target is Build CLI, Bot's cloud computer, or
-   both. Keep the current default three-platform scope unchanged.
-2. For Build, add an explicit `grok` host, declarations and native/compatibility
-   root checks. Exercise `grok inspect --json` before any activation, then verify
-   catalog discovery, canonical Skill/template reads and a bounded operation.
-3. For Bot, enroll the verified computer through an established route and record
-   Bot-to-computer association separately. Design private-library registration
-   only after its actual contract and approval controls are known.
-4. Reuse fixed source releases, exact-plan approval and per-environment journals.
-   Keep native authentication local; plugin distribution, hooks, shared context,
-   routines and telemetry synchronization remain outside this iteration.
+`grok` is an additive host choice. Existing workspace and source defaults remain
+`codex`, `cursor`, `claude-code`; they do not automatically opt into Grok.
+Both the selected source's `platforms` and the workspace's `platforms` must include
+`grok`. For a Grok-only workspace declaration:
+
+```json
+{
+  "schema_version": "skills-auditor-workspace-declaration/v1",
+  "baseline": ["grok-baseline"],
+  "platforms": ["grok"]
+}
+```
+
+Bind a dependency-complete source, then register, review and apply:
+
+```bash
+skills-audit workspace source add grok-baseline --kind local --root /sources/package \
+  --include skills --include templates --require-file templates/report.md \
+  --entry review=skills/review --platform grok
+skills-audit workspace register grok-project --environment laptop \
+  --path /work/project --declaration /work/project/skills-auditor.workspace.json
+skills-audit workspace plan grok-project --plan-out grok-plan.json
+skills-audit workspace apply grok-plan.json --approve-plan-id REVIEWED_PLAN_ID
+skills-audit workspace verify grok-project --native grok
+```
+
+Portable source definitions can be committed in the declaration's `sources`, as
+described in [workspace management](workspace-management.md). Git pins, local
+content snapshots, exact-plan approval, dependency layout, inverse plans and
+replacement recovery use the same lifecycle as the other hosts. Legacy
+`integrate --target grok` and `--target grok@global` are also supported.
+
+For an existing registered workspace, explicitly add `grok` to its platform list
+and register the same workspace ID/path again before planning. Registration can
+add platforms while preserving existing installation identities. It cannot
+remove roots, rebind the directory or silently reuse a different instance.
+
+## Discovery and configuration
+
+The primary project entry is `.grok/skills/NAME`. User registration uses
+`$GROK_HOME/skills` when `GROK_HOME` is set, otherwise `~/.grok/skills`.
+`GROK_HOME` must be absolute for managed discovery. User, project and parent
+repository roots include Grok plus Agent/Cursor/Claude compatibility roots.
+
+Auditor reads explicit `[skills].paths` from owner-local Grok user, project and
+managed configuration layers, without starting hooks, MCPs or plugins. Extra
+paths must be absolute. Conflicting aliases, broken links and malformed configs
+block planning. File paths and configuration hashes stay in private target
+plans; config content is not copied into releases. Changes to roots or config
+hashes after review stale that plan before activation. Python 3.11+ uses
+`tomllib`; Python 3.9/3.10 install the declared `tomli` compatibility dependency.
+
+## Native verification and remaining acceptance
+
+`workspace verify --native grok` invokes the explicit `grok` executable with
+`--no-auto-update ... inspect --json`. It checks the returned Grok contract and
+compares discovered Skill identities and canonical paths with active managed
+entries, then actually reads those files. Unavailable, ambiguous or shadowed
+results stay unverified. No raw native configuration or authentication output is
+returned. A native discovery gap does not revoke otherwise healthy filesystem
+approval; the explicitly requested combined verification still fails.
+
+The result level is `catalog_and_reads`. It does not claim a model followed the
+Skill, read a required template or completed a useful operation. A fresh native
+session must perform those bounded checks separately. Project trust also matters:
+the tested Grok Build 1.0.70 omits project Skills from an untrusted directory's
+catalog. Auditor never changes native folder trust, hook trust, login or plugin
+settings to make verification pass. An explicitly configured user Skill path can
+be discovered independently; the report retains `project_trusted: false`.
+
+The official 1.0.70 binary used for isolated discovery is retained privately for
+acceptance. It does not replace global executables or borrow another client's
+credentials. No successful authenticated Grok model operation is claimed until
+native authentication and any required project trust are completed by their owner.
 
 ## Executable identity and client updates
 

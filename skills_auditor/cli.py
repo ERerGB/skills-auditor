@@ -2207,7 +2207,7 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
         "--target",
         action="append",
         default=[],
-        help="Named host target, optionally @global (cursor, claude-code, codex). Repeatable.",
+        help="Named host target, optionally @global (cursor, claude-code, codex, grok). Repeatable.",
     )
     p_integrate.add_argument(
         "--target-root",

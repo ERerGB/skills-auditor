@@ -20,7 +20,7 @@ from ..lifecycle.snapshots import inspect_source
 from .common import MAX_BYTES, fields, fail, identifier, platforms, relative
 
 IGNORED = {".git", ".venv", "node_modules", "__pycache__", ".skills-auditor-local", ".DS_Store"}
-PLUGIN_MARKERS = {".codex-plugin", ".claude-plugin", ".cursor-plugin"}
+PLUGIN_MARKERS = {".codex-plugin", ".claude-plugin", ".cursor-plugin", ".grok-plugin"}
 
 
 def source_binding(value):

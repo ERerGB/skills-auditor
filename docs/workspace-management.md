@@ -1,11 +1,11 @@
 # Skills across workspaces and environments
 
-See the [Grok integration proposal](grok-environments.md) for the distinction
+See [Grok Build integration](grok-environments.md) for explicit opt-in and the distinction
 between a Grok model in Cursor, Grok Build CLI and Grok Bot's shared cloud computer.
 
 `skills-audit workspace` manages a reviewed collection across local projects or
-existing SSH connections. It is independent of Potology. Codex, Cursor CLI and
-Claude Code use their native project Skill directories. Existing integration and
+existing SSH connections. It is independent of Potology. Codex, Cursor CLI,
+Claude Code and Grok Build use their native project Skill directories. Existing integration and
 lifecycle v1 commands remain available; nothing adopts an old installation silently.
 
 ## Identity and storage
@@ -14,7 +14,7 @@ lifecycle v1 commands remain available; nothing adopts an old installation silen
 | --- | --- |
 | Environment | Operator ID, explicit instance generation and target-local runtime fingerprint |
 | Workspace | Environment, workspace ID, concrete path and directory device/inode |
-| Agent platform | `codex`, `cursor`, or `claude-code` |
+| Agent platform | `codex`, `cursor`, `claude-code`, or explicitly selected `grok` |
 | Installation | Workspace/platform/Skill mapping to a lifecycle installation ID |
 | Release | Git commit or explicitly marked local snapshot, content/permission hashes and relative entrypoint |
 
@@ -115,8 +115,10 @@ marked unverified and requiring migration review; inventory never adopts them.
 
 `verify` checks managed hashes, authorization, the effective installation view,
 native-root conflicts and actual file readability. Its `native_discovery` field
-remains `unverified`: filesystem checks alone do not establish that a running
-client reloaded its catalog. Complete acceptance with a fresh target CLI session:
+remains `unverified` unless explicit native inspection is requested. Grok Build
+supports `verify --native grok` for native catalog and actual Skill reads;
+filesystem checks alone do not establish that a running client reloaded its
+catalog. Complete acceptance with a fresh target CLI session:
 
 1. Discover the selected Skill through the native catalog or slash invocation.
 2. Have the client actually read its `SKILL.md` and selected dependency file.

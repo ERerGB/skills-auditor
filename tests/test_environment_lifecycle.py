@@ -96,4 +96,4 @@ class TestEnvironmentLifecycle(unittest.TestCase):
             self.assertEqual((install_root / "product-research").resolve(), canonical.resolve())
             self.assertEqual([a.action for a in plan_sync(install_root, mapping)], ["noop"])
 
-        self.assertEqual(len(registry.all()), 4)
+        self.assertEqual(len(registry.all()), len(BUILTIN_ENVIRONMENTS.all()) + 1)

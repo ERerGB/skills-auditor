@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ..lifecycle.common import LifecycleError
 from ..lifecycle.locking import locked_paths
-from .common import MAX_BYTES, PREFIX, atomic_json, checked, declaration, digest, fail, identifier, read_json, seal, utc_now
+from .common import DEFAULT_PLATFORMS, MAX_BYTES, PREFIX, atomic_json, checked, declaration, digest, fail, identifier, read_json, seal, utc_now
 from .providers import provider
 from .registry import Registry
 from .sources import capture
@@ -21,7 +21,7 @@ class WorkspaceService:
             fail("workspace_registry", "Register an environment before its workspaces.")
         declared = declaration(read_json(declaration_path))
         result = provider(environment, state["environments"][environment]).call("register", workspace=name,
-            path=str(path), platforms=declared.get("platforms", ["codex", "cursor", "claude-code"]))
+            path=str(path), platforms=declared.get("platforms", list(DEFAULT_PLATFORMS)))
         self.registry.put("workspaces", name, {"environment": environment, "path": str(path),
                           "declaration": str(Path(declaration_path).resolve())})
         return result
@@ -151,7 +151,9 @@ class WorkspaceService:
             atomic_json(path, result)
             return result
 
-    def verify(self, workspaces=()):
+    def verify(self, workspaces=(), *, native_platforms=()):
+        if any(name != "grok" for name in native_platforms) or len(native_platforms) != len(set(native_platforms)):
+            fail("workspace_platform", "Explicit native verification currently supports Grok Build only.")
         state = self.registry.read()
         results = []
         for name in list(workspaces) or sorted(state["workspaces"]):
@@ -159,7 +161,8 @@ class WorkspaceService:
                 fail("workspace_missing", "Workspace is not registered.")
             environment = state["workspaces"][name]["environment"]
             try:
-                value = provider(environment, state["environments"][environment]).call("verify", workspace=name)
+                options = {"native_platforms": list(native_platforms)} if native_platforms else {}
+                value = provider(environment, state["environments"][environment]).call("verify", workspace=name, **options)
             except LifecycleError as error:
                 value = {"workspace": name, "valid": False, "status": "unknown", "code": error.code, "message": error.message}
             results.append({"environment": environment, **value})

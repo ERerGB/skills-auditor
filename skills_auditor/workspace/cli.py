@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from ..lifecycle.common import LifecycleError
-from .common import atomic_json, fail, read_json
+from .common import DEFAULT_PLATFORMS, PLATFORMS, atomic_json, fail, read_json
 from .service import WorkspaceService
 
 
@@ -36,7 +36,7 @@ def parser(prog="skills-audit workspace"):
     add.add_argument("--require-file", action="append", default=[])
     add.add_argument("--repository", help="Credential-free provenance URL; no implicit fetch.")
     add.add_argument("--entry", action="append", required=True, help="ALIAS=RELATIVE/SKILL/DIRECTORY")
-    add.add_argument("--platform", action="append", choices=("codex", "cursor", "claude-code"))
+    add.add_argument("--platform", action="append", choices=PLATFORMS)
     register = sub.add_parser("register", help="Explicitly bind a workspace and prepare empty native roots.")
     register.add_argument("id")
     register.add_argument("--environment", required=True)
@@ -54,6 +54,7 @@ def parser(prog="skills-audit workspace"):
     apply.add_argument("--approve-plan-id")
     verify = sub.add_parser("verify")
     verify.add_argument("workspaces", nargs="*")
+    verify.add_argument("--native", action="append", choices=("grok",), default=[], help="Read the native catalog; never grants folder/hook trust or logs in.")
     rollback = sub.add_parser("rollback", help="Prepare a new reviewed inverse; never silently replays old approval.")
     rollback.add_argument("plan", type=Path)
     rollback.add_argument("--plan-out", type=Path)
@@ -88,7 +89,7 @@ def main(argv=None, prog="skills-audit workspace"):
             binding = {"root": str(args.root.expanduser().resolve()), "kind": args.kind,
                        "include": args.include, "entries": entries,
                        "required_files": args.require_file,
-                       "platforms": args.platform or ["codex", "cursor", "claude-code"]}
+                       "platforms": args.platform or list(DEFAULT_PLATFORMS)}
             if args.commit:
                 binding["commit"] = args.commit
             if args.repository:
@@ -112,7 +113,7 @@ def main(argv=None, prog="skills-audit workspace"):
         elif args.command == "apply":
             value = service.apply(read_json(args.plan), approve_plan_id=args.approve_plan_id)
         elif args.command == "verify":
-            value = service.verify(args.workspaces)
+            value = service.verify(args.workspaces, native_platforms=args.native)
         elif args.command == "rollback":
             value = service.rollback(read_json(args.plan))
         elif args.command == "recover":
