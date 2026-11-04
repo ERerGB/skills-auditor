@@ -1,5 +1,8 @@
 # Skills across workspaces and environments
 
+See the [Grok integration proposal](grok-environments.md) for the distinction
+between a Grok model in Cursor, Grok Build CLI and Grok Bot's shared cloud computer.
+
 `skills-audit workspace` manages a reviewed collection across local projects or
 existing SSH connections. It is independent of Potology. Codex, Cursor CLI and
 Claude Code use their native project Skill directories. Existing integration and

@@ -493,7 +493,7 @@ class Node:
         return {"binding": binding, "workspaces": workspaces, "free_bytes": shutil.disk_usage(self.root).free,
                 "installations": installations,
                 "legacy_installations": legacy,
-                "clients": {"codex": bool(shutil.which("codex")), "cursor": bool(shutil.which("cursor-agent") or shutil.which("agent")),
+                "clients": {"codex": bool(shutil.which("codex")), "cursor": bool(shutil.which("cursor-agent")),
                             "claude-code": bool(shutil.which("claude"))}}
 
     def dispatch(self, request):
