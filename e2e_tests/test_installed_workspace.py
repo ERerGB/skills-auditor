@@ -10,6 +10,52 @@ CLI = os.environ['SKILLS_AUDITOR_CLI']
 
 
 class TestInstalledWorkspace(unittest.TestCase):
+    def test_environment_owned_source_cli_pins_rechecks_and_exports_without_bindings(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            home = root / "home"
+            home.mkdir()
+            registry = root / "controller"
+            environment = dict(os.environ, HOME=str(home))
+            def cli(*args, expected=0):
+                result = subprocess.run([CLI, "workspace", "--registry-root", str(registry), *map(str, args)],
+                    env=environment, cwd=root, text=True, capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                return json.loads(result.stdout)
+            declaration = {"schema_version": "skills-auditor-workspace-declaration/v1",
+                           "baseline": ["owned"], "platforms": ["codex"]}
+            for name in ("author", "receiver"):
+                project = root / name
+                project.mkdir()
+                (project / "declaration.json").write_text(json.dumps(declaration))
+                cli("environment", "add", name, "--provider", "local", "--generation", name + "-v1",
+                    "--state-dir", root / (name + "-state"))
+                cli("register", name, "--environment", name, "--path", project,
+                    "--declaration", project / "declaration.json")
+            source = root / "author/package"
+            (source / "skills/probe").mkdir(parents=True)
+            (source / "skills/probe/SKILL.md").write_text("---\nname: probe\ndescription: owned source fixture\n---\nRead ../../template\n")
+            (source / "template").write_text("OWNER_H1")
+            cli("source", "add", "owned", "--environment", "author", "--root", source,
+                "--kind", "local", "--include", "skills", "--include", "template",
+                "--require-file", "template", "--entry", "probe=skills/probe", "--platform", "codex")
+            plan = cli("plan", "receiver", "--plan-out", root / "plan.json")
+            self.assertEqual(plan["source_owners"]["owned"]["generation"], "author-v1")
+            (source / "template").write_text("OWNER_H2")
+            stale = cli("apply", root / "plan.json", "--approve-plan-id", plan["plan_id"], expected=3)
+            self.assertEqual(stale["code"], "workspace_stale")
+            self.assertFalse((root / "receiver/.agents/skills/probe").exists())
+            fresh = cli("plan", "receiver", "--plan-out", root / "fresh.json")
+            cli("apply", root / "fresh.json", "--approve-plan-id", fresh["plan_id"])
+            entry = (root / "receiver/.agents/skills/probe").resolve()
+            self.assertEqual((entry.parent.parent / "template").read_text(), "OWNER_H2")
+            cli("export-release", root / "fresh.json", "--out", root / "release.json")
+            exported = (root / "release.json").read_text()
+            self.assertNotIn(str(source), exported)
+            self.assertNotIn("source_owners", exported)
+            self.assertTrue(cli("verify", "receiver")["valid"])
+            self.assertEqual(cli("plan", "receiver")["summary"]["changes"], 0)
+
     def test_explicit_grok_host_and_unavailable_native_inspection(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()

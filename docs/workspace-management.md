@@ -8,6 +8,26 @@ existing SSH connections. It is independent of Potology. Codex, Cursor CLI,
 Claude Code and Grok Build use their native project Skill directories. Existing integration and
 lifecycle v1 commands remain available; nothing adopts an old installation silently.
 
+## Reuse scope: the Rule of Three
+
+Keep project-specific Skills in their owning project's versioned source. A second
+project's concrete need is a reason to inspect and explicitly adapt or deliver a
+fixed version; it does not by itself justify extracting a generic Skill or adding
+a centralized catalog. Each project retains its own SOP and authorization scope.
+
+Consider a shared abstraction only after at least three independent, observed
+requirements expose a stable common part. Repeated invocations of one Skill do
+not count as independent requirements. The third requirement triggers a design
+review, rather than automatic promotion: extract only the demonstrated common
+behavior and keep project differences explicit. Record the examples in ordinary
+planning evidence; no reuse counter or telemetry service is needed.
+
+For `container-workspace-operations`, Magpie is the existing implementation and
+Potology is the second requested use case. Generic extraction and a new central
+catalog are deferred. The existing workspace bindings, fixed-version delivery
+and reviewed installation workflow remain in scope; they do not require moving
+Skill authorship into a central service.
+
 ## Identity and storage
 
 | Identity | Binding |
@@ -21,7 +41,10 @@ lifecycle v1 commands remain available; nothing adopts an old installation silen
 The same path in two environments is never one installation. Fingerprints detect
 accidental runtime replacement; they are not remote cryptographic attestation.
 Replacing an instance requires explicit enrollment with a new state directory and
-generation. Old grants are not transported to the replacement.
+generation. Old grants are not transported to the replacement. Registered native
+Skill roots must keep their enrolled canonical resolution inside the workspace;
+later redirection blocks planning, application, verification and recovery. Internal
+aliases are supported when they resolve to the physical root enrolled at setup.
 
 Commit a [workspace declaration](../config/skills-auditor.workspace.example.json)
 to each project. Its `sources` records contain source kind, pinned commit,
@@ -102,8 +125,10 @@ identity, environment generation, unchanged installations, lifecycle preconditio
 and native discovery conflicts. It executes the saved child plans without
 rediscovering the selection. Each target checks free space before candidate
 staging and again before activation, reserving space for snapshots and evidence.
-Capacity failure stops before installation changes on that target. Other targets
-may already have completed; no cross-environment atomicity is promised.
+Capacity estimates count shared snapshot payloads once per validated content
+identity, while reserving filesystem and transaction evidence space for each
+installation. Capacity failure stops before installation changes on that target.
+Other targets may already have completed; no cross-environment atomicity is promised.
 
 User-level, project-level, parent repository and compatibility Skill roots are
 checked for same-name entries, including nested packs and broken shadows. A
@@ -146,6 +171,26 @@ skills-audit workspace register remote-project --environment buildbox \
   --path /workspace/project --declaration /work/declarations/remote.workspace.json
 ```
 
+A source can belong to an enrolled execution environment as well. After
+registering a workspace on `buildbox` above, bind its package without resolving
+its path on the controller:
+
+```bash
+skills-audit workspace source add remote-baseline --environment buildbox \
+  --root /workspace/skills-package --kind local \
+  --include skills --include templates --require-file templates/report.md \
+  --entry review=skills/review
+```
+
+`--environment` selects the source owner; `--root` is an absolute path there.
+The registered provider captures the package and checks that environment's
+runtime generation. Plans retain the private owner binding and source hashes;
+apply captures again before any target changes. A changed or unreachable source
+blocks application. Sources without `--environment` retain controller-local
+behavior. Portable release exports contain selected bytes and provenance, without
+owner addresses, machine paths or grants, so recovery can proceed after the
+original source is unavailable.
+
 SSH uses the native alias and its owner-local credential references, strict host
 checking, batch mode and no agent/port forwarding. A bounded JSON worker accepts
 only workspace protocol operations, not arbitrary shell instructions. Authentication
@@ -173,8 +218,9 @@ not a clean failure or an automatic retry. `recover` inspects target journals an
 stable child transaction IDs before explicit resume. Completed children are checked
 without repeating pointer changes. Missing target journal plus existing child
 effects requires investigation. Resuming a partial operation is an explicit action;
-ordinary `apply` refuses it. Offline targets remain unknown while completed target
-results remain recorded. Partial compensation can use the existing per-installation
+ordinary `apply` refuses it. Resume checks native discovery conflicts again before
+pending children advance, preserving already completed siblings and any foreign
+entries. Offline targets remain unknown while completed target results remain recorded. Partial compensation can use the existing per-installation
 lifecycle recovery; aggregate rollback requires completed deployment evidence.
 
 Rollback generates a fresh inverse plan selecting retained versions or disabling
@@ -207,6 +253,13 @@ integration receipt can be supplied with
 migration. It must still verify against the actual target and exact whole-package
 layout; it is evidence, never a transported authorization. Mismatched old layouts
 need a separately reviewed migration rather than copying a lone `SKILL.md`.
+
+One original legacy receipt may cover several selected entries. Planning
+validates the complete receipt; each migration child keeps that original evidence
+and rechecks its exact old pointer, source hash and common dependencies before
+its own effects. A completed sibling does not invalidate the remaining children.
+An unrelated or changed selected entry still blocks; recovery uses the recorded
+child transactions rather than inventing a replacement receipt.
 
 Tracked links, including the existing Magpie repairs, require a repository migration
 commit/PR that identifies affected paths and records native acceptance before old

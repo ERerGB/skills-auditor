@@ -1,3 +1,4 @@
+import base64
 import copy
 import subprocess
 import tempfile
@@ -68,6 +69,93 @@ class TestWorkspaceSources(unittest.TestCase):
                 with self.assertRaises(LifecycleError) as caught:
                     capture(binding)
                 self.assertEqual(caught.exception.code, expected)
+
+    def test_nested_plugin_marker_cannot_be_omitted_from_a_local_selection(self):
+        nested = self.source / "bundle"
+        nested.mkdir()
+        (nested / ".codex-plugin").mkdir()
+        import shutil
+        shutil.copytree(self.source / "skills", nested / "skills")
+        with self.assertRaises(LifecycleError) as caught:
+            capture(dict(self.binding, include=["bundle/skills"], entries={"alpha": "bundle/skills/alpha"}))
+        self.assertEqual(caught.exception.code, "workspace_plugin_excluded")
+
+    def test_git_plugin_ownership_uses_the_pinned_tree_not_dirty_markers(self):
+        def git(*args):
+            return subprocess.check_output(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+                "-C", str(self.source), *args], text=True).strip()
+        git("init", "-q")
+        git("add", ".")
+        git("-c", "user.name=fixture", "-c", "user.email=fixture@localhost", "commit", "-qm", "standalone")
+        standalone = git("rev-parse", "HEAD")
+        marker = self.source / ".codex-plugin"
+        marker.mkdir()
+        (marker / "plugin.json").write_text("{}")
+        git("add", ".codex-plugin")
+        git("-c", "user.name=fixture", "-c", "user.email=fixture@localhost", "commit", "-qm", "plugin")
+        plugin = git("rev-parse", "HEAD")
+        # An unselected marker from a later checkout does not alter pinned bytes.
+        packet = capture(dict(self.binding, kind="git", commit=standalone))
+        self.assertEqual(packet["origin"]["commit"], standalone)
+        (marker / "plugin.json").unlink()
+        marker.rmdir()
+        with self.assertRaises(LifecycleError) as caught:
+            capture(dict(self.binding, kind="git", commit=plugin))
+        self.assertEqual(caught.exception.code, "workspace_plugin_excluded")
+
+    def test_cyclic_source_root_is_a_contract_error(self):
+        alias = self.root / "source-loop"
+        alias.symlink_to(alias)
+        with self.assertRaises(LifecycleError) as caught:
+            capture(dict(self.binding, root=str(alias)))
+        self.assertEqual(caught.exception.code, "workspace_source")
+
+    def test_source_alias_cannot_hide_plugin_ownership(self):
+        alias = self.root / "source-alias"
+        alias.symlink_to(self.source / "skills/alpha", target_is_directory=True)
+        for marker in (".codex-plugin", ".claude-plugin", ".cursor-plugin", ".grok-plugin"):
+            plugin = self.source / marker
+            plugin.mkdir()
+            try:
+                with self.subTest(marker=marker):
+                    with self.assertRaises(LifecycleError) as caught:
+                        capture(dict(self.binding, root=str(alias), include=["SKILL.md"], entries={"alpha": "."}))
+                    self.assertEqual(caught.exception.code, "workspace_plugin_excluded")
+            finally:
+                plugin.rmdir()
+
+    def test_portable_ancestor_aliases_are_rejected_before_any_staging_write(self):
+        def record(path, kind, data):
+            return {"path": path, "mode": 0o777 if kind == "symlink" else 0o644,
+                    "kind": kind, "data": base64.b64encode(data).decode()}
+        for parent, alias in (("a", "A"), ("caf\u00e9", "cafe\u0301")):
+            with self.subTest(parent=parent), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                outside = root / "outside"
+                outside.mkdir()
+                packet = {"origin": {"kind": "local", "uncommitted_snapshot": True},
+                    "entries": {"alpha": "skill"}, "platforms": ["codex"], "files": [
+                        record(parent, "symlink", b"../outside"),
+                        record(alias + "/pwn", "file", b"owned-portable-boundary-test"),
+                        record("skill/SKILL.md", "file", b"---\nname: alpha\ndescription: fixture\n---\n")]}
+                destination = root / "destination"
+                with self.assertRaises(LifecycleError) as caught:
+                    unpack(packet, destination)
+                self.assertEqual(caught.exception.code, "workspace_packet")
+                self.assertFalse(destination.exists())
+                self.assertEqual(list(outside.iterdir()), [])
+
+    def test_implicit_directory_spellings_share_one_portable_namespace(self):
+        packet = capture(self.binding)
+        packet.pop("inspection")
+        for name in ("folder/one", "FOLDER/two"):
+            packet["files"].append({"path": name, "mode": 0o644,
+                "kind": "file", "data": base64.b64encode(b"owned").decode()})
+        destination = self.root / "invalid-implicit-alias"
+        with self.assertRaises(LifecycleError) as caught:
+            unpack(packet, destination)
+        self.assertEqual(caught.exception.code, "workspace_packet")
+        self.assertFalse(destination.exists())
 
     def test_untrusted_packet_paths_and_bytes_cannot_escape(self):
         packet = capture(self.binding)

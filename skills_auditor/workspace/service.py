@@ -14,6 +14,15 @@ class WorkspaceService:
     def __init__(self, registry_root=None):
         self.registry = Registry(registry_root)
 
+    def _capture(self, binding, state):
+        owner = binding.get("environment")
+        if owner is None:
+            return capture(binding)
+        if owner not in state["environments"]:
+            fail("workspace_registry", "Source owner is not a registered environment.", environment=owner)
+        source = {k: v for k, v in binding.items() if k != "environment"}
+        return provider(owner, state["environments"][owner]).call("capture", source=source)
+
     def register(self, name, environment, path, declaration_path):
         identifier(name)
         state = self.registry.read()
@@ -63,7 +72,7 @@ class WorkspaceService:
         elif source_ids - set(state["sources"]):
             fail("workspace_source", "A declared source has no owner-local binding.", sources=sorted(source_ids - set(state["sources"])))
         else:
-            packets = {name: capture({**state["sources"][name], **source_specs.get(name, {})}) for name in sorted(source_ids)}
+            packets = {name: self._capture({**state["sources"][name], **source_specs.get(name, {})}, state) for name in sorted(source_ids)}
         retained = seal({"schema_version": PREFIX + "release/v1", "sources": packets}, "release_id")
         if len(json.dumps(retained).encode()) > MAX_BYTES:
             fail("workspace_capacity", "Aggregate release exceeds the portable transport bound; split the plan.")
@@ -84,6 +93,11 @@ class WorkspaceService:
             "created_at": utc_now(), "operation": "restore" if release else "deploy", "declarations": declarations,
             "release_id": retained["release_id"],
             "source_specs": {name: source_specs[name] for name in sorted(source_ids) if name in source_specs},
+            "source_owners": {} if release else {name: {
+                "environment": state["sources"][name].get("environment", "controller"),
+                "generation": state["environments"][state["sources"][name]["environment"]]["generation"]
+                    if "environment" in state["sources"][name] else None,
+                "root": state["sources"][name]["root"]} for name in sorted(source_ids)},
             "sources": {key: {"inspection": p["inspection"], "origin": p["origin"]} for key, p in packets.items()},
             "targets": targets})
 
@@ -115,7 +129,7 @@ class WorkspaceService:
         state = self._plan(plan, approve_plan_id)
         retained = checked(read_json(self.registry.root / "releases" / (plan["release_id"] + ".json")), "release_id", "release") if plan.get("release_id") else None
         for name, expected in plan["sources"].items():
-            current = retained["sources"][name] if plan["operation"] == "restore" else capture({**state["sources"][name], **plan.get("source_specs", {}).get(name, {})})
+            current = retained["sources"][name] if plan["operation"] == "restore" else self._capture({**state["sources"][name], **plan.get("source_specs", {}).get(name, {})}, state)
             if {"inspection": current["inspection"], "origin": current["origin"]} != expected:
                 fail("workspace_stale", "Selected source changed after review; no target effects started.", source=name)
         path = self.registry.root / "transactions" / (plan["plan_id"] + ".json")

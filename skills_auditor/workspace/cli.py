@@ -30,6 +30,7 @@ def parser(prog="skills-audit workspace"):
     add = source.add_parser("add")
     add.add_argument("id")
     add.add_argument("--root", required=True, type=Path)
+    add.add_argument("--environment", help="Source owner; --root is interpreted there, never on the controller.")
     add.add_argument("--kind", choices=("git", "local"), required=True)
     add.add_argument("--commit")
     add.add_argument("--include", action="append", required=True)
@@ -86,12 +87,26 @@ def main(argv=None, prog="skills-audit workspace"):
                 if not sep or name in entries:
                     fail("workspace_arguments", "Entrypoints must be distinct ALIAS=PATH operands.")
                 entries[name] = path
-            binding = {"root": str(args.root.expanduser().resolve()), "kind": args.kind,
+            if args.environment and (not args.root.is_absolute() or ".." in args.root.parts):
+                fail("workspace_source", "Environment-owned sources require an absolute owner-local root.")
+            try:
+                if args.environment:
+                    source_root = str(args.root)
+                else:
+                    local_root = args.root.expanduser()
+                    if local_root.is_symlink() and not local_root.exists():
+                        fail("workspace_source", "Source root link is dangling or cyclic.")
+                    source_root = str(local_root.resolve())
+            except (OSError, RuntimeError) as error:
+                fail("workspace_source", "Source root cannot be resolved.", error=str(error))
+            binding = {"root": source_root, "kind": args.kind,
                        "include": args.include, "entries": entries,
                        "required_files": args.require_file,
                        "platforms": args.platform or list(DEFAULT_PLATFORMS)}
             if args.commit:
                 binding["commit"] = args.commit
+            if args.environment:
+                binding["environment"] = args.environment
             if args.repository:
                 binding["repository"] = args.repository
             service.registry.put("sources", args.id, binding)

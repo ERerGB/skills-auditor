@@ -48,17 +48,17 @@ class SSHProvider:
             result = subprocess.run([*self._argv(), shlex.join(command)], input=json.dumps(request), text=True,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
         except (OSError, subprocess.TimeoutExpired) as error:
-            fail("workspace_unreachable" if method in {"inspect", "plan", "verify"} else "workspace_uncertain",
+            fail("workspace_unreachable" if method in {"inspect", "plan", "verify", "capture"} else "workspace_uncertain",
                  "Environment operation did not return a confirmed response; inspect before retrying.", error=str(error))
         if len(result.stdout.encode()) > MAX_BYTES:
-            fail("workspace_unreachable" if method in {"inspect", "plan", "verify"} else "workspace_uncertain",
+            fail("workspace_unreachable" if method in {"inspect", "plan", "verify", "capture"} else "workspace_uncertain",
                  "Oversized environment response; inspect state before recovery.")
         try:
             response = decode_json(result.stdout)
             if not isinstance(response, dict):
                 raise ValueError("Expected object")
         except (ValueError, TypeError, LifecycleError):
-            fail("workspace_unreachable" if method in {"inspect", "plan", "verify"} else "workspace_uncertain",
+            fail("workspace_unreachable" if method in {"inspect", "plan", "verify", "capture"} else "workspace_uncertain",
                  "Native SSH did not return a workspace protocol response.", exit_code=result.returncode,
                  diagnostic=result.stderr[-1000:])
         if response.get("status") == "error":

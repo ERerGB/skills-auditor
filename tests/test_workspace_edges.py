@@ -40,6 +40,38 @@ class TestWorkspaceEdges(WorkspaceFixture):
         blocked = self.service.plan()
         self.assertEqual(blocked['status'],'blocked')
 
+    def shared_package_capacity_plan(self):
+        beta = self.source / "skills/beta"
+        beta.mkdir()
+        (beta / "SKILL.md").write_text("---\nname: beta\ndescription: shared capacity fixture\n---\n")
+        (self.source / "helper").write_bytes(b"P" * (4 * 1024 * 1024))
+        self.registry.put("sources", "shared", dict(self.binding,
+            entries={"alpha": "skills/alpha", "beta": "skills/beta"}))
+        return self.service.plan(["one"])
+
+    def test_apply_capacity_counts_one_shared_payload_and_per_installation_metadata(self):
+        plan = self.shared_package_capacity_plan()
+        free = 12 * 1024 * 1024
+        usage = shutil._ntuple_diskusage(total=100 * 1024 * 1024, used=100 * 1024 * 1024 - free, free=free)
+        with patch("skills_auditor.workspace.node.shutil.disk_usage", return_value=usage):
+            result = self.apply(plan)
+        self.assertEqual(result["status"], "completed", result)
+        roots = {(self.one / platform / "skills" / name).resolve().parent.parent
+                 for platform in (".agents", ".cursor", ".claude") for name in ("alpha", "beta")}
+        self.assertEqual(len(roots), 1)
+        self.assertTrue(self.service.verify(["one"])["valid"])
+
+    def test_shared_payload_capacity_still_blocks_before_any_installation_effect(self):
+        plan = self.shared_package_capacity_plan()
+        usage = shutil._ntuple_diskusage(total=100 * 1024 * 1024, used=93 * 1024 * 1024, free=7 * 1024 * 1024)
+        with patch("skills_auditor.workspace.node.shutil.disk_usage", return_value=usage):
+            result = self.apply(plan)
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["targets"][0]["code"], "workspace_capacity")
+        for platform in (".agents", ".cursor", ".claude"):
+            for name in ("alpha", "beta"):
+                self.assertFalse((self.one / platform / "skills" / name).exists())
+
     def test_conflicting_baselines_require_explicit_override(self):
         other=self.root/'other';self.write_package(other,'different')
         self.registry.put('sources','other',dict(self.binding,root=str(other)))
@@ -70,6 +102,72 @@ class TestWorkspaceEdges(WorkspaceFixture):
         recovered=self.service.recover(plan,mode='resume',approve_plan_id=plan['plan_id'])
         self.assertEqual(recovered['status'],'completed')
         self.assertEqual((self.one/'.agents/skills/alpha').lstat().st_ino,before)
+
+    def test_recovery_rechecks_native_shadows_before_pending_pointer_effects(self):
+        from skills_auditor.lifecycle.engine import Manager
+        plan = self.service.plan(["one"])
+        original_apply = Manager.apply
+        count = 0
+        def interrupt(manager, child, **kwargs):
+            nonlocal count
+            count += 1
+            if count == 2:
+                raise LifecycleError("fixture_interruption", "Stop before the second child effect.")
+            return original_apply(manager, child, **kwargs)
+        with patch.object(Manager, "apply", interrupt):
+            self.assertEqual(self.apply(plan)["status"], "partial")
+        first = self.one / ".agents/skills/alpha"
+        inode = first.lstat().st_ino
+        shadow = self.home / ".agents/skills/alpha"
+        shadow.mkdir(parents=True)
+        (shadow / "SKILL.md").write_text("---\nname: alpha\ndescription: foreign shadow\n---\n")
+        result = self.service.recover(plan, mode="resume", approve_plan_id=plan["plan_id"])
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["observations"][0]["code"], "workspace_stale")
+        self.assertEqual(first.lstat().st_ino, inode)
+        self.assertFalse((self.one / ".cursor/skills/alpha").exists())
+        self.assertFalse((self.one / ".claude/skills/alpha").exists())
+        self.assertIn("foreign shadow", (shadow / "SKILL.md").read_text())
+
+    def test_enrolled_native_root_cannot_be_redirected_outside_the_workspace(self):
+        outside = self.root / "outside-root"
+        outside.mkdir()
+        native = self.one / ".agents/skills"
+        native.rmdir()
+        native.symlink_to(outside, target_is_directory=True)
+        plan = self.service.plan(["one"])
+        self.assertEqual(plan["status"], "blocked")
+        self.assertEqual(plan["targets"][0]["error"]["code"], "workspace_replaced")
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_native_root_drift_blocks_saved_apply_verify_and_recovery(self):
+        plan = self.service.plan(["one"])
+        outside = self.root / "outside-root"
+        outside.mkdir()
+        native = self.one / ".agents/skills"
+        native.rmdir()
+        native.symlink_to(outside, target_is_directory=True)
+        result = self.apply(plan)
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["targets"][0]["code"], "workspace_replaced")
+        self.assertFalse(self.service.verify(["one"])["valid"])
+        recovered = self.service.recover(plan, mode="resume", approve_plan_id=plan["plan_id"])
+        self.assertEqual(recovered["status"], "partial")
+        self.assertEqual(recovered["observations"][0]["code"], "workspace_replaced")
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertFalse((self.one / ".cursor/skills/alpha").exists())
+
+    def test_enrolled_internal_native_root_alias_remains_supported(self):
+        project = self.root / "internal-alias-project"
+        (project / ".cursor/skills").mkdir(parents=True)
+        (project / ".agents").mkdir()
+        (project / ".agents/skills").symlink_to("../.cursor/skills", target_is_directory=True)
+        self.write_declaration(project, platforms=["codex"])
+        self.service.register("alias-project", "local", project, project / "skills-auditor.workspace.json")
+        plan = self.service.plan(["alias-project"])
+        self.assertEqual(self.apply(plan)["status"], "completed")
+        self.assertTrue(self.service.verify(["alias-project"])["valid"])
+        self.assertTrue((project / ".cursor/skills/alpha").is_symlink())
 
     def test_unreachable_environment_does_not_erase_known_results(self):
         self.registry.put('environments','offline',{'provider':'ssh','generation':'one','state_dir':'/private/state','connection':'existing-alias'})

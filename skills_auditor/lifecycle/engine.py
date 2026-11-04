@@ -334,20 +334,26 @@ class Manager:
         plan["plan_id"] = digest(plan)
         return plan
 
-    def _legacy(self, receipt, source, target):
-        from ..integration import IntegrationError, verify_receipt
+    def _legacy(self, receipt, source, target, *, full=True):
+        from ..integration import IntegrationError, _receipt_checks, validate_receipt, verify_receipt
         if not isinstance(receipt, dict):
             raise LifecycleError("legacy_receipt_required", "Migration requires a complete legacy receipt object.")
         try:
-            result = verify_receipt(receipt)
+            validate_receipt(receipt)
+            matching = [item for item in receipt["results"]
+                        if item.get("expected_target") == str(source) and str(Path(item["root"]) / item["name"]) == str(target)]
+            if len(matching) != 1:
+                raise LifecycleError("legacy_mismatch", "Legacy receipt must bind this exact source and target once.")
+            # Planning admits the complete receipt. During application an
+            # earlier reviewed sibling may already have advanced its pointer.
+            # Keep original evidence intact and recheck this child's old entry,
+            # source hash and all common dependencies; step.before is checked
+            # separately before any pointer effect.
+            checks = verify_receipt(receipt)["checks"] if full else _receipt_checks(receipt, matching)
         except (IntegrationError, OSError, ValueError) as error:
             raise LifecycleError("legacy_invalid", "Legacy receipt cannot be validated.", details=_error(error)) from error
-        if result["status"] != "passed":
-            raise LifecycleError("legacy_invalid", "Only a currently clean legacy receipt can migrate.")
-        matching = [item for item in receipt["results"]
-                    if item.get("expected_target") == str(source) and str(Path(item["root"]) / item["name"]) == str(target)]
-        if not matching:
-            raise LifecycleError("legacy_mismatch", "Legacy receipt does not bind this exact source and target.")
+        if any(not check.get("ok") for check in checks):
+            raise LifecycleError("legacy_invalid", "Only currently clean legacy evidence can migrate.")
         return copy.deepcopy(receipt)
 
     def _owned_observation(self, installation, observation):
@@ -665,7 +671,7 @@ class Manager:
             if any(actual.get(key) != plan["version"]["snapshot"].get(key) for key in actual):
                 raise LifecycleError("stale_plan", "Candidate content changed after planning.")
         if targets and plan["legacy_receipt"]:
-            self._legacy(plan["legacy_receipt"], Path(plan["source"]) / plan["version"].get("entrypoint", "."), Path(plan["after"]["target"]))
+            self._legacy(plan["legacy_receipt"], Path(plan["source"]) / plan["version"].get("entrypoint", "."), Path(plan["after"]["target"]), full=False)
         if targets:
             for step in plan["steps"]:
                 if observation is not None and step["path"] == plan["before"]["target"]:

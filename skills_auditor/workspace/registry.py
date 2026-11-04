@@ -56,6 +56,8 @@ class Registry:
             current = self.read()
             if kind == "workspaces" and value["environment"] not in current["environments"]:
                 fail("workspace_registry", "Register the execution environment first.")
+            if kind == "sources" and "environment" in value and value["environment"] not in current["environments"]:
+                fail("workspace_registry", "Register the source's owning environment first.")
             previous = current[kind].get(name)
             if previous == value:
                 return current

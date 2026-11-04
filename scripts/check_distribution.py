@@ -137,6 +137,7 @@ def check_sdist(path: Path) -> None:
             prefix + "docs/releasing.md",
             prefix + "docs/vendir-integration.md",
             prefix + "docs/releases/0.9.0.md",
+            prefix + "docs/releases/0.10.0.md",
             prefix + "config/potology-vendir/vendir.yml",
             prefix + "config/potology-vendir/vendir.lock.yml",
             prefix + "config/potology-vendir/skills-auditor.json",

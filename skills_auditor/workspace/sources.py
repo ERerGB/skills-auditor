@@ -26,7 +26,9 @@ PLUGIN_MARKERS = {".codex-plugin", ".claude-plugin", ".cursor-plugin", ".grok-pl
 def source_binding(value):
     if not isinstance(value, dict) or not isinstance(value.get("root"), str) or not Path(value["root"]).is_absolute():
         fail("workspace_source", "Source requires an absolute owner-local root.")
-    source_spec({k: v for k, v in value.items() if k != "root"})
+    if "environment" in value:
+        identifier(value["environment"])
+    source_spec({k: v for k, v in value.items() if k not in {"root", "environment"}})
     return value
 
 
@@ -69,6 +71,10 @@ def _selected(path, includes):
         item == "." or path == item or path.startswith(item + "/") for item in includes)
 
 
+def _portable_path_key(path):
+    return unicodedata.normalize("NFD", path).casefold()
+
+
 def _git(root, *args):
     try:
         return subprocess.check_output(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", "-C", str(root), *args],
@@ -79,8 +85,14 @@ def _git(root, *args):
 
 def capture(binding):
     source_binding(binding)
-    root = Path(binding["root"])
-    if any((ancestor / marker).is_dir() for ancestor in [root, *root.parents] for marker in PLUGIN_MARKERS):
+    if "environment" in binding:
+        fail("workspace_source_environment", "An environment-owned source must be captured through its registered provider.")
+    try:
+        root = Path(binding["root"]).resolve()
+    except (OSError, RuntimeError) as error:
+        fail("workspace_source", "Source root cannot be resolved.", error=str(error))
+    if binding["kind"] == "local" and any((ancestor / marker).is_dir()
+            for ancestor in [root, *root.parents] for marker in PLUGIN_MARKERS):
         fail("workspace_plugin_excluded", "Do not flatten plugin-owned Skills into standalone releases.")
     records = []
     total = 0
@@ -101,14 +113,21 @@ def capture(binding):
         actual = _git(root, "rev-parse", binding["commit"] + "^{commit}").decode().strip()
         if actual != binding["commit"]:
             fail("workspace_git", "Git commit did not resolve exactly.")
-        for row in _git(root, "ls-tree", "-rz", "--full-tree", actual).split(b"\0"):
-            if not row:
-                continue
-            meta, raw_path = row.split(b"\t", 1)
+        rows = [row.split(b"\t", 1) for row in
+                _git(root, "ls-tree", "-rz", "--full-tree", actual).split(b"\0") if row]
+        plugin_roots = set()
+        for _, raw_path in rows:
+            parts = Path(raw_path.decode("utf-8")).parts
+            for index, part in enumerate(parts):
+                if part in PLUGIN_MARKERS:
+                    plugin_roots.add("/".join(parts[:index]))
+        for meta, raw_path in rows:
             mode, kind, oid = meta.decode().split()
             path = raw_path.decode("utf-8")
             if not _selected(path, binding["include"]):
                 continue
+            if any(not parent or path == parent or path.startswith(parent + "/") for parent in plugin_roots):
+                fail("workspace_plugin_excluded", "Selected pinned files belong to a plugin package.", path=path)
             if kind != "blob":
                 fail("workspace_source", "Submodules require an explicitly materialized source.")
             data = _git(root, "cat-file", "blob", oid)
@@ -120,7 +139,7 @@ def capture(binding):
         if "repository" in binding:
             origin["repository"] = binding["repository"]
     else:
-        if not root.is_dir() or root == root.parent or root.resolve() == Path.home().resolve():
+        if not root.is_dir() or root == root.parent or root == Path.home().resolve():
             fail("workspace_source", "Select a concrete local package, not a home/filesystem root.")
         seen = set()
         for include in binding["include"]:
@@ -137,6 +156,12 @@ def capture(binding):
                 if rel == "." or rel in seen or not _selected(rel, binding["include"]):
                     continue
                 seen.add(rel)
+                try:
+                    physical = path.resolve()
+                except (OSError, RuntimeError) as error:
+                    fail("workspace_source", "Selected source path cannot be resolved.", error=str(error))
+                if any((parent / marker).is_dir() for parent in [physical, *physical.parents] for marker in PLUGIN_MARKERS):
+                    fail("workspace_plugin_excluded", "Selected files belong to a plugin package.", path=rel)
                 info = path.lstat()
                 observations.append((path, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns))
                 if stat.S_ISLNK(info.st_mode):
@@ -189,7 +214,7 @@ def unpack(packet, destination):
         path = relative(item["path"])
         if set(Path(path).parts) & PLUGIN_MARKERS:
             fail("workspace_plugin_excluded", "Plugin packages are outside standalone Skill delivery.")
-        folded = unicodedata.normalize("NFD", path).casefold()
+        folded = _portable_path_key(path)
         if folded in names or item["kind"] not in {"file", "directory", "symlink"}:
             fail("workspace_packet", "Duplicate or unsupported package entry.")
         names.add(folded)
@@ -203,10 +228,19 @@ def unpack(packet, destination):
         if size > MAX_BYTES:
             fail("workspace_capacity", "Package exceeds the transport bound.")
         decoded.append((item, data))
-    non_directories = {item["path"] for item, _ in decoded if item["kind"] != "directory"}
+    non_directories = {_portable_path_key(item["path"]) for item, _ in decoded if item["kind"] != "directory"}
+    spellings = {}
     for item, data in decoded:
-        if any(parent.as_posix() in non_directories for parent in Path(item["path"]).parents):
+        path = Path(item["path"])
+        if any(_portable_path_key(parent.as_posix()) in non_directories for parent in path.parents):
             fail("workspace_packet", "Package entry traverses a non-directory.")
+        for component in [path, *path.parents]:
+            if component == Path("."):
+                continue
+            name = component.as_posix()
+            key = _portable_path_key(name)
+            if spellings.setdefault(key, name) != name:
+                fail("workspace_packet", "Package directories have ambiguous portable spellings.")
         if item["kind"] == "symlink":
             target = data.decode("utf-8")
             if Path(target).is_absolute():

@@ -5,6 +5,7 @@ instructions or accept arbitrary shell commands. Each installation effect uses
 the existing lifecycle engine; there is no cross-target atomicity claim.
 """
 import copy
+import json
 import os
 import shutil
 from pathlib import Path
@@ -46,6 +47,14 @@ class Node:
         path = Path(value["path"])
         if not path.is_dir() or [path.stat().st_dev, path.stat().st_ino] != value["path_identity"]:
             fail("workspace_replaced", "Registered workspace directory was replaced or moved.")
+        for platform, enrolled in value["roots"].items():
+            native = BUILTIN_ENVIRONMENTS.get(platform).primary_project_root(path)
+            try:
+                current = native.resolve()
+            except (OSError, RuntimeError):
+                fail("workspace_replaced", "Registered native Skill root cannot be resolved.")
+            if not native.is_dir() or str(current) != enrolled or not current.is_relative_to(path):
+                fail("workspace_replaced", "Registered native Skill root was replaced or redirected.", platform=platform)
         return value
 
     def register(self, request):
@@ -86,6 +95,11 @@ class Node:
 
     def _record_key(self, workspace, platform, name):
         return digest([workspace, platform, name])
+
+    def capture(self, request):
+        self._binding(request)
+        from .sources import capture
+        return capture(request["source"])
 
     def _records(self, manager, workspace):
         return [r["data"] for r in manager.repository.list("workspace_installation")
@@ -348,10 +362,21 @@ class Node:
                 manager._validate_plan(child["plan"])
                 with manager._locks(child["plan"]):
                     manager._preconditions(child["plan"])
-            required = sum(sum(p.stat().st_size for p in Path(c["plan"]["source"]).rglob("*") if p.is_file())
-                           for c in plan["children"] if c["plan"]["source"])
-            if shutil.disk_usage(self.root).free < required * 2 + 1024 * 1024:
-                fail("workspace_capacity", "Target needs space for staging, snapshots and transaction evidence.", required=required * 2 + 1024 * 1024)
+            payloads, metadata = {}, 0
+            for child in plan["children"]:
+                core = child["plan"]
+                # Core validation and source preconditions above establish this
+                # identity. Several aliases/platforms share one snapshot tree,
+                # while each still writes its own plan, journal and receipt.
+                metadata += len(json.dumps(core).encode()) * 3 + 16 * 1024
+                if core["source"]:
+                    key = core["version"]["snapshot"]["snapshot_tree_sha256"]
+                    if key not in payloads:
+                        payloads[key] = 4096 + sum(4096 + (p.stat().st_size if p.is_file() else 0)
+                                                  for p in Path(core["source"]).rglob("*"))
+            required = sum(payloads.values()) * 2 + metadata + 1024 * 1024
+            if shutil.disk_usage(self.root).free < required:
+                fail("workspace_capacity", "Target needs space for shared snapshots and per-installation transaction evidence.", required=required)
             journal = {"schema_version": PREFIX + "transaction/v1", "plan_id": plan["plan_id"],
                        "workspace": plan["workspace"], "status": "running", "results": [], "created_at": utc_now()}
             atomic_json(journal_path, journal)
@@ -361,6 +386,11 @@ class Node:
 
     def _execute(self, plan, journal, path, manager):
         try:
+            # Both first application and explicit resume pass this boundary.
+            # Completed siblings remain selected owned targets; a new shadow
+            # must stop before any pending installation advances.
+            if self._conflicts(plan["workspace_binding"], plan["desired"]):
+                fail("workspace_stale", "Native discovery roots changed before pending activation.")
             for expected in plan["expectations"]:
                 if not any(c["plan"]["installation_id"] == expected["installation_id"] for c in plan["children"]):
                     if (manager.get_installation(expected["installation_id"]) != expected
@@ -535,14 +565,14 @@ class Node:
 
     def dispatch(self, request):
         fields(request, {"method", "environment", "generation"},
-               {"state_dir", "workspace", "path", "platforms", "declaration", "packets", "plan", "approve_plan_id", "mode", "legacy_receipts", "native_platforms"})
+               {"state_dir", "workspace", "path", "platforms", "declaration", "packets", "plan", "approve_plan_id", "mode", "legacy_receipts", "native_platforms", "source"})
         identifier(request["environment"])
         identifier(request["generation"])
         methods = {"register": self.register, "inspect": self.inspect, "plan": self.plan, "apply": self.apply,
-                   "verify": self.verify, "recover": self.recover, "rollback": self.rollback}
+                   "verify": self.verify, "recover": self.recover, "rollback": self.rollback, "capture": self.capture}
         if request["method"] not in methods:
             fail("workspace_method", "Unknown target operation; shell execution is not part of this protocol.")
-        if request["method"] in {"inspect", "verify"}:
+        if request["method"] in {"inspect", "verify", "capture"}:
             return methods[request["method"]](request)
         if request["method"] == "register":
             self.root.mkdir(parents=True, exist_ok=True, mode=0o700)

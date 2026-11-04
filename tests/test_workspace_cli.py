@@ -48,6 +48,14 @@ class TestWorkspaceCli(WorkspaceFixture):
                 value = self.call(*args, expected=2 if args[0]=='unknown' else 3)
                 self.assertEqual(value['status'], 'error')
 
+    def test_cyclic_controller_source_root_is_one_json_error(self):
+        alias = self.root / "source-loop"
+        alias.symlink_to(alias)
+        value = self.call("source", "add", "bad-loop", "--root", alias, "--kind", "local",
+                          "--include", "skills", "--entry", "alpha=skills/alpha", expected=3)
+        self.assertEqual(value["code"], "workspace_source")
+        self.assertNotIn("bad-loop", self.registry.read()["sources"])
+
     def test_fresh_environment_restores_retained_sources_without_old_approvals(self):
         original = self.service.plan()
         self.apply(original)

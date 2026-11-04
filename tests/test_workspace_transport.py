@@ -1,4 +1,5 @@
 """Real stdio worker boundary using a fixture in place of native SSH transport."""
+import copy
 import json
 import os
 import sys
@@ -35,6 +36,67 @@ class TestWorkspaceTransport(WorkspaceFixture):
             self.assertNotIn(str(self.source),str(foreign))
             status=self.service.status()['environments']
             self.assertNotEqual(status['local']['binding']['runtime_fingerprint'],status['remote']['binding']['runtime_fingerprint'])
+
+    def multi_entry_legacy(self):
+        beta = self.source / "skills/beta"
+        beta.mkdir()
+        (beta / "SKILL.md").write_text("---\nname: beta\ndescription: migration fixture\n---\nRead ../../helper\n")
+        self.registry.put("sources", "shared", dict(self.binding,
+            entries={"alpha": "skills/alpha", "beta": "skills/beta"}))
+        roots = [self.one / name / "skills" for name in (".agents", ".cursor", ".claude")]
+        spec = IntegrationSpec(project_root=self.root, sources=(self.source / "skills",),
+            targets=tuple(IntegrationTarget("fixture", root=root) for root in roots))
+        receipt, _ = apply_integration_plan(build_integration_plan(spec))
+        return receipt, roots
+
+    def test_one_original_receipt_migrates_multiple_entries_without_invalidating_siblings(self):
+        receipt, roots = self.multi_entry_legacy()
+        original = copy.deepcopy(receipt)
+        plan = self.service.plan(["one"], legacy_receipts={"local": [receipt]})
+        children = plan["targets"][0]["plan"]["children"]
+        self.assertEqual(len(children), 6)
+        self.assertTrue(all(child["plan"]["legacy_receipt"] == original for child in children))
+        self.assertEqual(self.apply(plan)["status"], "completed")
+        self.assertEqual(receipt, original)
+        self.assertTrue(self.service.verify(["one"])["valid"])
+        self.assertEqual(self.service.plan(["one"])["summary"]["changes"], 0)
+        for root in roots:
+            for name in ("alpha", "beta"):
+                self.assertNotEqual((root / name).resolve(), self.source / "skills" / name)
+                self.assertEqual(((root / name).resolve().parent.parent / "helper").read_text(), "H1")
+
+    def test_multi_entry_legacy_migration_resumes_after_a_completed_sibling(self):
+        from skills_auditor.lifecycle.engine import Manager
+        receipt, roots = self.multi_entry_legacy()
+        plan = self.service.plan(["one"], legacy_receipts={"local": [receipt]})
+        original_apply = Manager.apply
+        calls = []
+        def interrupt(manager, child, **kwargs):
+            calls.append(child["installation_id"])
+            if len(calls) == 2:
+                raise LifecycleError("fixture_interruption", "Stop before the second child effect.")
+            return original_apply(manager, child, **kwargs)
+        with patch.object(Manager, "apply", interrupt):
+            self.assertEqual(self.apply(plan)["status"], "partial")
+        self.assertNotEqual((roots[0] / "alpha").resolve(), self.source / "skills/alpha")
+        self.assertEqual((roots[0] / "beta").resolve(), self.source / "skills/beta")
+        resumed = self.service.recover(plan, mode="resume", approve_plan_id=plan["plan_id"])
+        self.assertEqual(resumed["status"], "completed")
+        self.assertTrue(self.service.verify(["one"])["valid"])
+
+    def test_multi_entry_legacy_target_drift_blocks_before_any_new_pointer_effect(self):
+        receipt, roots = self.multi_entry_legacy()
+        plan = self.service.plan(["one"], legacy_receipts={"local": [receipt]})
+        beta = roots[0] / "beta"
+        beta.unlink()
+        beta.symlink_to(self.source / "skills/alpha")
+        result = self.apply(plan)
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual((roots[0] / "alpha").resolve(), self.source / "skills/alpha")
+        self.assertEqual(beta.resolve(), self.source / "skills/alpha")
+        invalid = self.service.plan(["one"], legacy_receipts={"local": [receipt]})
+        self.assertEqual(invalid["status"], "blocked")
+        self.assertEqual(invalid["targets"][0]["error"]["code"], "workspace_legacy")
 
     def test_clean_same_target_legacy_receipt_migrates_whole_package_only(self):
         native=self.one/'.agents/skills'
