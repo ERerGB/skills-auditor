@@ -2178,6 +2178,7 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("workspace", help="Manage Skills across local and SSH workspaces; use workspace --help.")
     from skills_auditor.lifecycle.cli import register as register_lifecycle
     register_lifecycle(sub)
 
@@ -2799,6 +2800,9 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
 
 
 def _main(prog: Optional[str] = None) -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "workspace":
+        from skills_auditor.workspace.cli import main as workspace_main
+        return workspace_main(sys.argv[2:], prog=(prog or "skills-audit") + " workspace")
     if len(sys.argv) > 1 and sys.argv[1] == "lifecycle":
         from skills_auditor.lifecycle.cli import main as lifecycle_main
         return lifecycle_main(sys.argv[2:], prog=(prog or "skills-audit") + " lifecycle")

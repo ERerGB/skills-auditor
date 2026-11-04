@@ -48,6 +48,7 @@ host does not expose slash commands, ask for the same workflow in natural langua
 | Resolve duplicate or variant skills | Relinks byte-identical definitions; keeps differing variants visible for routing |
 | Bring canonical skills to a workspace | Plans native links for Cursor, Claude Code, Codex, or an explicit custom root |
 | Keep approved bytes stable during edits | Managed installations expose approved snapshots while replacement candidates remain separate |
+| Manage a baseline across local and SSH workspaces | Plans fixed package releases plus explicit project exceptions, with target-local approval and recovery |
 | Recover an interrupted managed change | Records intent and step evidence for explicitly approved resume or compensation |
 | Investigate a managed warning | Links persistent incidents, bounded evidence and append-only notes to resolution proof |
 | Leave a checkable result | Produces plans, receipts, route traces, verification results, and optional run ledgers |
@@ -59,6 +60,11 @@ replacement, and never infer permission to delete.
 Choose [managed lifecycle](docs/managed-lifecycle.md) when you need version selection, durable
 revocation and recoverable transactions. Existing live-link integrations remain compatible;
 migration is explicit.
+
+Use [multi-workspace management](docs/workspace-management.md) for local or existing
+SSH environments, with optional Potology routing and Codex, Cursor CLI and Claude
+Code registrations. Repository declarations stay portable; machine bindings and
+execution evidence stay private. Plugin environment management is deferred.
 
 ## Install and start
 

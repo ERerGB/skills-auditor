@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ERerGB/skills-auditor/schemas/workspace-declaration-v1.schema.json",
+  "title": "Portable workspace Skill declaration",
+  "type": "object",
+  "required": ["schema_version", "baseline"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "skills-auditor-workspace-declaration/v1"},
+    "platforms": {"$ref": "#/$defs/platforms"},
+    "sources": {"type": "object", "propertyNames": {"$ref": "#/$defs/id"}, "additionalProperties": {"$ref": "#/$defs/source"}},
+    "baseline": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+    "overrides": {
+      "type": "object", "propertyNames": {"$ref": "#/$defs/id"},
+      "additionalProperties": {"oneOf": [{"type": "null"}, {
+        "type": "object", "required": ["source", "entry"], "additionalProperties": false,
+        "properties": {"source": {"$ref": "#/$defs/id"}, "entry": {"$ref": "#/$defs/relative"}}
+      }]}
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$"},
+    "relative": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)(?!.*(?:^|/)\\.(?:/|$)).+$|^\\.$"},
+    "platforms": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["codex", "cursor", "claude-code"]}},
+    "source": {
+      "type": "object", "required": ["kind", "include", "entries", "platforms"], "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["local", "git"]},
+        "repository": {"type": "string", "pattern": "^(https|ssh)://"},
+        "commit": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+        "include": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/relative"}},
+        "required_files": {"type": "array", "items": {"$ref": "#/$defs/relative"}},
+        "entries": {"type": "object", "minProperties": 1, "propertyNames": {"$ref": "#/$defs/id"}, "additionalProperties": {"$ref": "#/$defs/relative"}},
+        "platforms": {"$ref": "#/$defs/platforms"}
+      },
+      "allOf": [{"if": {"properties": {"kind": {"const": "git"}}}, "then": {"required": ["commit"]}, "else": {"not": {"anyOf": [{"required": ["commit"]}, {"required": ["repository"]}]}}}]
+    }
+  }
+}

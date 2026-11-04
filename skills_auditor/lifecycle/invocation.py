@@ -315,7 +315,8 @@ def select(manager, installation_id, *, policy="strict", refresh=True, override_
             result["decision"] = "proceed" if proceed else "block" if policy == "strict" else "warn"
             result["exit_code"] = {"proceed": 0, "warn": 4, "block": 3}[result["decision"]]
             if proceed:
-                result["snapshot_path"] = manager.repository.get("version", record["data"]["version_id"])["data"]["snapshot"]["path"]
+                from .engine import version_entry
+                result["snapshot_path"] = version_entry(manager.repository.get("version", record["data"]["version_id"])["data"])
             _audit(manager, result, actor, tool)
         manager_context(manager)
         return result

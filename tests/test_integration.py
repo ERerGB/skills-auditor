@@ -496,10 +496,10 @@ class TestIntegrationCli(IntegrationFixture):
             path.name: json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(schema_root.glob("*.schema.json"))
         }
-        # New versioned lifecycle contracts are additive. Keep the historical
+        # Versioned lifecycle/workspace contracts are additive. Keep the historical
         # integration contract inventory exact without forbidding new families.
         self.assertEqual(
-            {name for name in schemas if not name.startswith("lifecycle-")},
+            {name for name in schemas if not name.startswith(("lifecycle-", "workspace-"))},
             {
                 "error-v1.schema.json",
                 "integration-plan-v1.schema.json",

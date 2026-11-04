@@ -37,6 +37,11 @@ not part of that content key. Two installations of one Skill can therefore adopt
 the same content from independently reviewed plans, including different source
 paths or previous versions.
 
+An optional `plan --entrypoint skills/alpha` selects a relative Skill directory
+inside the complete source package. The whole tree, including declared outer
+helpers/templates, remains in the immutable snapshot. Non-default entrypoints
+participate in version identity; omitted entrypoints retain existing v1 behavior.
+
 The first committed version record retains its original `source`, `created_at`,
 `parent_version_id` and `provenance`. A later adoption does not rewrite that
 origin, including when it migrates a legacy installation. Its own exact saved
