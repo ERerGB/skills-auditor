@@ -40,7 +40,7 @@ Phases: hash variants → infer platform from path (e.g. `.agents/` → codex) �
 ```bash
 skills-audit route --platform cursor --skills-dir "$HOME/.cursor/skills" --strategy archive
 
-skills-audit route --platform codex --skills-dir "$HOME/.claude/skills" --strategy archive
+skills-audit route --platform codex --skills-dir "$HOME/.codex/skills" --strategy archive
 
 skills-audit route \
   --platform cursor \
@@ -50,7 +50,7 @@ skills-audit route \
 
 skills-audit route \
   --platform codex \
-  --skills-dir "$HOME/.claude/skills" \
+  --skills-dir "$HOME/.codex/skills" \
   --trace-dir ./my-traces
 ```
 
