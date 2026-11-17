@@ -40,7 +40,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         references = record_verification(self.manager.repository, installation, verification)
         return verification, references
 
-    def fail(self, target=None):
+    def fail_installation(self, target=None):
         self.target.unlink(missing_ok=True)
         if target is not None:
             self.target.symlink_to(target)
@@ -55,7 +55,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         return verification
 
     def test_repeated_signature_deduplicates_and_same_observation_replay_is_idempotent(self):
-        first, references = self.fail()
+        first, references = self.fail_installation()
         incident_id = references[0]["incident_id"]
         second, again = self.capture()
         self.assertEqual(again[0]["incident_id"], incident_id)
@@ -73,13 +73,13 @@ class TestLifecycleIncidents(unittest.TestCase):
             self.assertEqual(repository.get("incident", incident_id)["data"], incident)
 
     def test_distinct_actual_target_and_failure_check_create_distinct_incidents(self):
-        _, first = self.fail("foreign-a")
-        _, second = self.fail("foreign-b")
+        _, first = self.fail_installation("foreign-a")
+        _, second = self.fail_installation("foreign-b")
         self.assertNotEqual(first[0]["incident_id"], second[0]["incident_id"])
         self.assertEqual(len(list_incidents(self.manager, installation_id=self.installation_id)), 2)
 
     def test_restored_bytes_link_original_incident_without_new_fault_or_resolution(self):
-        _, first = self.fail()
+        _, first = self.fail_installation()
         self.target.symlink_to(self.original_link)
         verification, second = self.capture()
         self.assertTrue(verification["integrity"]["valid"])
@@ -101,7 +101,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(list_incidents(self.manager), [])
 
     def test_notes_have_local_attribution_references_and_idempotent_event_ids(self):
-        verification, refs = self.fail()
+        verification, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         note = append_note(self.manager, identifier, "Reproduced using a missing target.", actor="investigator", tool="local-cli", evidence_refs=[{"kind": "verification", "id": verification["verification_id"]}], event_id="consumer-retry-key")
         duplicate = append_note(self.manager, identifier, "Reproduced using a missing target.", actor="investigator", tool="local-cli", evidence_refs=[{"kind": "verification", "id": verification["verification_id"]}], event_id="consumer-retry-key")
@@ -116,7 +116,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(len(investigate(self.manager, identifier)["events"]), 2)
 
     def test_unapproved_or_arbitrary_file_references_and_oversize_notes_rejected(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         cases = ({"text": "x" * 4097}, {"actor": ""}, {"tool": "bad\nlabel"}, {"evidence_refs": [{"kind": "file", "id": "/etc/passwd"}]}, {"evidence_refs": [{"kind": "receipt", "id": "missing"}]}, {"evidence_refs": ["../../private"]})
         for changes in cases:
@@ -126,7 +126,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(len(investigate(self.manager, identifier)["events"]), 1)
 
     def test_new_explicit_grant_completed_transaction_and_latest_clean_verification_resolve(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         old = copy.deepcopy(get_incident(self.manager, identifier))
         verification = self.renew()
@@ -140,7 +140,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(resolve(self.manager, identifier, verification_id=verification["verification_id"], actor="reviewer", tool="test"), resolved)
 
     def test_stale_wrong_or_uncommitted_proof_does_not_resolve(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         stale = self.renew()
         latest, _ = self.capture()
@@ -155,7 +155,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(get_incident(self.manager, identifier)["state"], "open")
 
     def test_explicit_nonremediation_disposition_requires_explanation_and_never_authorizes(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         before = self.manager.repository.get("installation", self.installation_id)
         with self.assertRaises(LifecycleError):
@@ -166,7 +166,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(self.manager.verify(self.installation_id)["approval"]["state"], "invalidated")
 
     def test_failed_note_and_resolution_writes_leave_append_only_history_and_state_unchanged(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         before = get_incident(self.manager, identifier)
         events = investigate(self.manager, identifier)["events"]
@@ -201,7 +201,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertIsNotNone(self.manager.repository.get("verification", verification["verification_id"]))
 
     def test_packet_is_bounded_schema_valid_and_does_not_collect_private_prose(self):
-        verification, refs = self.fail()
+        verification, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         for index in range(55):
             append_note(self.manager, identifier, "Explicit research note " + str(index), actor="reviewer", tool="test")
@@ -233,8 +233,8 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertNotIn("error", json.dumps(packet["incident"]["evidence"]))
 
     def test_superseding_links_related_incidents_without_erasing_history(self):
-        _, first = self.fail("foreign-a")
-        _, second = self.fail("foreign-b")
+        _, first = self.fail_installation("foreign-a")
+        _, second = self.fail_installation("foreign-b")
         old, new = first[0]["incident_id"], second[0]["incident_id"]
         superseded = supersede(self.manager, old, new, explanation="The second target change is the current investigation.", actor="reviewer", tool="test")
         self.assertEqual(superseded["state"], "superseded")
@@ -244,7 +244,7 @@ class TestLifecycleIncidents(unittest.TestCase):
             supersede(self.manager, new, old, explanation="Cannot form a cycle", actor="reviewer", tool="test")
 
     def test_signature_ignores_error_prose_random_fields_and_check_order(self):
-        first, refs = self.fail("foreign-target")
+        first, refs = self.fail_installation("foreign-target")
         copied = copy.deepcopy(first)
         copied["verification_id"] = "another-verification"
         copied["observed_at"] = first["observed_at"]
@@ -266,7 +266,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(packet["incident"]["observation_count"], 2)
 
     def test_uncommitted_or_malformed_observation_and_corrupt_projection_fail_closed(self):
-        verification, refs = self.fail()
+        verification, refs = self.fail_installation()
         copied = {**verification, "verification_id": "not-committed"}
         with self.assertRaises(LifecycleError):
             record_verification(self.manager.repository, self.manager.get_installation(self.installation_id), copied)
@@ -283,7 +283,7 @@ class TestLifecycleIncidents(unittest.TestCase):
             self.assertEqual(caught.exception.code, "incident_corrupt")
 
     def test_corrupt_event_payload_cannot_escape_packet_bounds(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         self.manager.repository.append_event("incident:" + identifier, "note", {"event_id": "malformed-event", "incident_id": identifier, "text": "x" * 4097, "evidence_refs": []}, "reviewer", "test")
         with self.assertRaises(LifecycleError) as caught:
@@ -305,7 +305,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertIsNone(self.manager.repository.get("verification-incidents", failed["verification_id"]))
 
     def test_note_after_resolution_preserves_disposition_and_mutually_exclusive_proofs(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         resolved = resolve(self.manager, identifier, disposition="obsolete", explanation="Explicit non-remediation decision.", actor="reviewer", tool="test")
         append_note(self.manager, identifier, "Historical follow-up only.", actor="reviewer", tool="test")
@@ -317,7 +317,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(resolve(self.manager, identifier, disposition="obsolete", explanation="Explicit non-remediation decision.", actor="reviewer", tool="test")["resolution"], resolved["resolution"])
 
     def test_invalid_lookup_filter_attribution_and_unicode_notes_are_rejected(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         for value in ("", "../foreign"):
             with self.subTest(value=value), self.assertRaises(LifecycleError):
@@ -336,7 +336,7 @@ class TestLifecycleIncidents(unittest.TestCase):
             append_note(self.manager, identifier, "note", actor="reviewer", tool="test", evidence_refs=[{}] * 21)
 
     def test_invalid_verification_guards_reject_before_event_or_index_writes(self):
-        verification, _ = self.fail()
+        verification, _ = self.fail_installation()
         installation = self.manager.get_installation(self.installation_id)
         mutations = (
             {"verification_id": ""}, {"skill_id": "other-skill"}, {"observed_at": None},
@@ -352,7 +352,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(self.manager.repository.list("incident-event"), events_before)
 
     def test_unsupported_actual_fact_types_are_not_serialized_as_private_objects(self):
-        verification, refs = self.fail()
+        verification, refs = self.fail_installation()
         copy_value = copy.deepcopy(verification)
         copy_value["verification_id"] = "bounded-evidence"
         for check in copy_value["integrity"]["checks"]:
@@ -365,7 +365,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertNotEqual(references[0]["incident_id"], refs[0]["incident_id"])
 
     def test_malformed_events_of_each_type_fail_closed(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         original_events = self.manager.repository.events
         baseline = original_events("incident:" + identifier)[0]
@@ -385,7 +385,7 @@ class TestLifecycleIncidents(unittest.TestCase):
 
     def test_resolution_rechecks_core_proof_even_if_cached_status_claims_healthy(self):
         from skills_auditor.lifecycle.status import read_status
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         verification = self.renew()
         healthy = read_status(self.manager, self.installation_id)
@@ -406,8 +406,8 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(get_incident(self.manager, identifier)["state"], "open")
 
     def test_superseded_incident_cannot_resolve_or_supersede_itself(self):
-        _, first = self.fail("foreign-a")
-        _, second = self.fail("foreign-b")
+        _, first = self.fail_installation("foreign-a")
+        _, second = self.fail_installation("foreign-b")
         old, new = first[0]["incident_id"], second[0]["incident_id"]
         with self.assertRaises(LifecycleError):
             supersede(self.manager, old, old, explanation="same", actor="reviewer", tool="test")
@@ -416,10 +416,10 @@ class TestLifecycleIncidents(unittest.TestCase):
             resolve(self.manager, old, disposition="obsolete", explanation="cannot replace supersession", actor="reviewer", tool="test")
 
     def test_corrupt_retry_index_cannot_hide_a_fault_or_link_another_grant(self):
-        first, refs = self.fail()
+        first, refs = self.fail_installation()
         original_installation = self.manager.get_installation(self.installation_id)
         self.renew()
-        _, other = self.fail()
+        _, other = self.fail_installation()
         self.assertNotEqual(refs[0]["incident_id"], other[0]["incident_id"])
         for identifiers in ([], "not-a-list", [other[0]["incident_id"]]):
             record = self.manager.repository.get("verification-incidents", first["verification_id"])
@@ -429,8 +429,8 @@ class TestLifecycleIncidents(unittest.TestCase):
             self.assertEqual(caught.exception.code, "incident_corrupt")
 
     def test_same_grant_retry_index_must_match_failure_signature_and_durable_observation(self):
-        _, first = self.fail("foreign-a")
-        second, references = self.fail("foreign-b")
+        _, first = self.fail_installation("foreign-a")
+        second, references = self.fail_installation("foreign-b")
         record = self.manager.repository.get("verification-incidents", second["verification_id"])
         self.manager.repository.put("verification-incidents", second["verification_id"], {"incident_ids": [first[0]["incident_id"]]}, expected_revision=record["revision"])
         with self.assertRaises(LifecycleError) as caught:
@@ -445,7 +445,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(len(original_events("incident:" + references[0]["incident_id"])), 1)
 
     def test_resolution_extra_fields_cannot_escape_projection_or_event_packet_bounds(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         resolve(self.manager, identifier, disposition="obsolete", explanation="fixture", actor="reviewer", tool="test")
         record = self.manager.repository.get("incident", identifier)
@@ -468,7 +468,7 @@ class TestLifecycleIncidents(unittest.TestCase):
             investigate(self.manager, identifier)
 
     def test_false_resolved_projection_without_committed_resolution_event_is_corrupt(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         record = self.manager.repository.get("incident", identifier)
         resolution = {"kind": "remediated", "resolved_at": utc_now(), "verification_id": "nonexistent-verification",
@@ -479,7 +479,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(caught.exception.code, "incident_corrupt")
 
     def test_historical_resolution_remains_readable_after_later_update_and_revocation(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         verification = self.renew()
         resolved = resolve(self.manager, identifier, verification_id=verification["verification_id"], actor="reviewer", tool="test")
@@ -499,7 +499,7 @@ class TestLifecycleIncidents(unittest.TestCase):
                 investigate(self.manager, identifier)
 
     def test_historical_resolution_requires_complete_unique_core_checks(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         verification = self.renew()
         resolve(self.manager, identifier, verification_id=verification["verification_id"], actor="reviewer", tool="test")
@@ -513,7 +513,7 @@ class TestLifecycleIncidents(unittest.TestCase):
             self.assertEqual(caught.exception.code, "incident_corrupt")
 
     def test_investigation_schema_enforces_complete_incident_and_event_payload_contracts(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         append_note(self.manager, identifier, "bounded note", actor="reviewer", tool="test")
         packet = investigate(self.manager, identifier)
@@ -541,7 +541,7 @@ class TestLifecycleIncidents(unittest.TestCase):
                 self.assertFalse(validator.is_valid(changed))
 
     def test_note_cannot_smuggle_another_event_types_unvalidated_fields(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         self.manager.repository.append_event("incident:" + identifier, "note", {"event_id": "cross-type-fields", "incident_id": identifier,
             "text": "valid note", "evidence_refs": [], "resolution": {"private_extra": "SECRET" * 200000}}, "reviewer", "test")
@@ -550,7 +550,7 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(caught.exception.code, "incident_corrupt")
 
     def test_false_superseded_projection_needs_related_incident_and_committed_event(self):
-        _, refs = self.fail()
+        _, refs = self.fail_installation()
         identifier = refs[0]["incident_id"]
         record = self.manager.repository.get("incident", identifier)
         self.manager.repository.put("incident", identifier, {**record["data"], "state": "superseded", "superseded_by": "incident-" + "f" * 64}, expected_revision=record["revision"])
@@ -559,8 +559,8 @@ class TestLifecycleIncidents(unittest.TestCase):
         self.assertEqual(caught.exception.code, "incident_corrupt")
 
     def test_supersession_history_survives_replacement_resolution_but_missing_link_does_not(self):
-        _, first = self.fail("foreign-a")
-        _, second = self.fail("foreign-b")
+        _, first = self.fail_installation("foreign-a")
+        _, second = self.fail_installation("foreign-b")
         old, new = first[0]["incident_id"], second[0]["incident_id"]
         supersede(self.manager, old, new, explanation="follow new evidence", actor="reviewer", tool="test")
         resolve(self.manager, new, disposition="obsolete", explanation="historical disposition", actor="reviewer", tool="test")
@@ -572,6 +572,21 @@ class TestLifecycleIncidents(unittest.TestCase):
 
         with patch.object(self.manager.repository, "get", side_effect=missing), self.assertRaises(LifecycleError):
             investigate(self.manager, old)
+
+
+class TestIncidentAssertionControl(unittest.TestCase):
+    def test_incident_fixture_assertion_failures_raise_without_mutating_installation(self):
+        fixture = TestLifecycleIncidents(methodName="runTest")
+        fixture.setUp()
+        try:
+            pointer = os.readlink(fixture.target)
+            installation = fixture.manager.get_installation(fixture.installation_id)
+            with self.assertRaises(AssertionError):
+                fixture.assertEqual("actual", "expected", "intentional assertion control")
+            self.assertEqual(os.readlink(fixture.target), pointer)
+            self.assertEqual(fixture.manager.get_installation(fixture.installation_id), installation)
+        finally:
+            fixture.doCleanups()
 
 
 if __name__ == "__main__":

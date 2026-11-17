@@ -139,7 +139,7 @@ class SkillIdentityTrace:
 @dataclass
 class RunTrace:
     """One complete dedup/route run."""
-    run_id: str = field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ"))
+    run_id: str = field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ") + "-" + uuid.uuid4().hex[:12])
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     skills_dir: str = ""
     active_platform: str = ""
@@ -160,6 +160,9 @@ TRACE_DIR = Path.home() / ".skills-auditor" / "traces"
 
 def write_trace(trace: RunTrace, trace_dir: Optional[Path] = None) -> Path:
     """Write a run trace to JSON. Returns the output path."""
+    if (not trace.run_id or trace.run_id in {".", ".."} or "/" in trace.run_id
+            or "\\" in trace.run_id or any(ord(char) < 32 for char in trace.run_id)):
+        raise ValueError("trace run id must be a single nonempty filename component")
     out_dir = trace_dir or TRACE_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{trace.run_id}.json"

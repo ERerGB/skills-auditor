@@ -594,7 +594,7 @@ and [receipts](../skills_auditor/schemas/lifecycle-retention-receipt-v1.schema.j
 JSON Schema validates shape; runtime additionally checks checksums, immutable
 record identity, cross-record binding, expected revisions, actual filesystem
 state and explicit plan approval. Checksums and local actor/tool labels are not
-signatures or authenticated identity. Standard-library runtime dependencies do
+signatures or authenticated identity. A small runtime dependency footprint does
 not remove these trust limitations.
 
 Legacy receipt verification remains stateless: H1 → H2 → H1 can make the same

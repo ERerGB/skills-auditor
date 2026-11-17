@@ -16,7 +16,7 @@
         "type": "object",
         "required": ["code", "ok"],
         "properties": {
-          "code": {"enum": ["receipt_not_completed", "target_link", "source_tree"]},
+          "code": {"enum": ["receipt_not_completed", "target_link", "source_tree", "required_file"]},
           "ok": {"type": "boolean"}
         }
       }
@@ -29,7 +29,7 @@
         "requires_reapproval": {"type": "boolean"},
         "reason_codes": {
           "type": "array",
-          "items": {"enum": ["receipt_not_completed", "target_link", "source_tree"]},
+          "items": {"enum": ["receipt_not_completed", "target_link", "source_tree", "required_file"]},
           "uniqueItems": true
         }
       },
@@ -201,6 +201,40 @@
                 "approval": {
                   "properties": {
                     "reason_codes": {"not": {"contains": {"const": "source_tree"}}}
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "checks": {
+                  "contains": {
+                    "type": "object",
+                    "required": ["code", "ok"],
+                    "properties": {
+                      "code": {"const": "required_file"},
+                      "ok": {"const": false}
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "approval": {
+                  "properties": {
+                    "reason_codes": {"contains": {"const": "required_file"}}
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "approval": {
+                  "properties": {
+                    "reason_codes": {"not": {"contains": {"const": "required_file"}}}
                   }
                 }
               }

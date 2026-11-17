@@ -188,5 +188,5 @@ If you are integrating, extending, or automating it:
 
 Full searchable map: [atlas.fulmail.net/oss/skills-auditor](https://atlas.fulmail.net/oss/skills-auditor)
 
-Python 3.9+ · standard-library runtime · [MIT License](LICENSE) ·
+Python 3.9+ · `tomli` on Python <3.11; standard library on 3.11+ · [MIT License](LICENSE) ·
 [GitHub repository](https://github.com/ERerGB/skills-auditor)

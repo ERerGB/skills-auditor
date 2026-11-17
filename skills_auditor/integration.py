@@ -662,11 +662,27 @@ def _atomic_write_json(path: Path, value: Dict[str, Any]) -> Path:
     return path
 
 
+def _guard_output_path(plan: Dict[str, Any], output: Path) -> None:
+    """Evidence publication must not mutate the source or installed contract."""
+    from skills_auditor.lifecycle.common import paths_overlap
+
+    protected = [Path(item["skill_root"]) for item in plan["source_skills"]]
+    protected.extend(Path(target["root"]) for target in plan["targets"])
+    protected.extend(Path(item["path"]) for item in plan.get("dependencies", []))
+    outputs = (output.expanduser().absolute(), output.expanduser().resolve(strict=False))
+    if any(paths_overlap(candidate, boundary)
+           for candidate in outputs for path in protected
+           for boundary in (path, path.resolve(strict=False))):
+        raise IntegrationError("unsafe_output_path", "plan and receipt outputs must stay outside source skill trees, required files and install roots")
+
+
+
 def save_plan(plan: Dict[str, Any], output: Optional[Path] = None) -> Path:
     validate_plan(plan)
     if output is None:
         project_root = Path(plan["spec"]["project_root"])
         output = project_root / DEFAULT_LOCAL_ROOT / "plans" / f"{plan['plan_id']}.json"
+    _guard_output_path(plan, output)
     try:
         return _atomic_write_json(output, plan)
     except OSError as exc:
@@ -1138,6 +1154,7 @@ def apply_integration_plan(
     receipt_output: Optional[Path] = None,
 ) -> Tuple[Dict[str, Any], Path]:
     issues = check_plan_preconditions(plan)
+    _guard_output_path(plan, receipt_output if receipt_output is not None else _default_receipt_path(plan, "pending"))
     if issues:
         raise IntegrationError(
             "stale_plan",

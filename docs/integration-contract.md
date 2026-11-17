@@ -65,7 +65,8 @@ Targets accept these forms:
 | `--target-root acme=.acme/skills` | Explicit custom environment root |
 | `{"environment":"acme","root":".acme/skills"}` | Custom root in the JSON spec |
 
-Built-in environment names are `cursor`, `claude-code`, and `codex`. High-level integration requires
+Built-in environment names are `cursor`, `claude-code`, `codex`, and explicitly
+selected `grok`. High-level integration requires
 source and target roots to be disjoint and rejects target roots that contain each other. Use a
 precise canonical source tree rather than asking the tool to install within a source or source from
 within an install namespace.

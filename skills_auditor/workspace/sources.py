@@ -144,6 +144,10 @@ def capture(binding):
         seen = set()
         for include in binding["include"]:
             start = root / include
+            try:
+                start.resolve().relative_to(root)
+            except (ValueError, OSError, RuntimeError):
+                fail("workspace_source", "Selected dependency escapes the canonical package root.", path=include)
             if not start.exists() and not start.is_symlink():
                 fail("workspace_dependency_missing", "Selected package dependency is missing.", path=include)
             candidates = [start]
@@ -160,6 +164,10 @@ def capture(binding):
                     physical = path.resolve()
                 except (OSError, RuntimeError) as error:
                     fail("workspace_source", "Selected source path cannot be resolved.", error=str(error))
+                try:
+                    physical.relative_to(root)
+                except ValueError:
+                    fail("workspace_source", "Selected dependency escapes the canonical package root.", path=rel)
                 if any((parent / marker).is_dir() for parent in [physical, *physical.parents] for marker in PLUGIN_MARKERS):
                     fail("workspace_plugin_excluded", "Selected files belong to a plugin package.", path=rel)
                 info = path.lstat()
