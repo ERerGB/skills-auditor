@@ -1,7 +1,7 @@
 # Install skills-auditor
 
-Python 3.9 or newer is required. The package has no runtime dependencies outside the standard
-library.
+Python 3.9 or newer is required. Python 3.9/3.10 installs the declared `tomli`
+compatibility dependency for TOML parsing; Python 3.11+ uses the standard library.
 
 ## Isolated install from GitHub
 
@@ -158,8 +158,10 @@ directory. Configure it in the host environment so the writer and checker use th
 Update the checkout and reinstall/upgrade the Python CLI, then refresh the local marketplace
 and install the updated plugin through Codex. Verify its installed version is `0.2.0` or later;
 editing the source checkout does not replace an already cached plugin. Review the updated
-definitions in `/hooks` again: this version changes commands to use `PLUGIN_ROOT`. Explicitly
-enable capture, restart the task, and repeat the live check above.
+definitions in `/hooks` again: this version changes commands to use `PLUGIN_ROOT`.
+Preserve the existing capture preference. If capture is wanted, explicitly enable
+it, restart the task, and repeat the live check above. Otherwise verify `disabled`
+and continue ordinary auditing without granting hook trust or enabling capture.
 
 See [design, evidence limits, and health states](skill-trace.md) for troubleshooting details.
 

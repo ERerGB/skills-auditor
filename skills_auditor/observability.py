@@ -191,12 +191,19 @@ def _event_date(timestamp: str) -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def _log_component(value: str) -> str:
+    if (not value or value in {".", ".."} or "/" in value or "\\" in value
+            or any(ord(char) < 32 for char in value)):
+        raise ValueError("log path fields must be single nonempty filename components")
+    return value
+
+
 def event_log_path(log_dir: Path, event: TriggerLogEvent) -> Path:
-    return log_dir / "logs" / _event_date(event.timestamp) / f"{event.kind}.jsonl"
+    return log_dir / "logs" / _log_component(_event_date(event.timestamp)) / f"{_log_component(event.kind)}.jsonl"
 
 
 def sensor_log_path(log_dir: Path, event: SensorEvent) -> Path:
-    return log_dir / "sensors" / _event_date(event.timestamp) / f"{event.provider}.jsonl"
+    return log_dir / "sensors" / _log_component(_event_date(event.timestamp)) / f"{_log_component(event.provider)}.jsonl"
 
 
 def write_trigger_log(event: TriggerLogEvent, log_dir: Optional[Path] = None) -> Path:

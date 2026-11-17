@@ -98,7 +98,8 @@ metadata, without raw prompts or full tool inputs and outputs. See the
 
 ## Dependencies and license
 
-The runtime uses the Python standard library. Build tooling is declared in
+The runtime uses the Python standard library, plus the declared `tomli`
+compatibility dependency on Python 3.9/3.10. Build tooling is declared in
 [`pyproject.toml`](../pyproject.toml). The project is distributed under the
 [`MIT License`](../LICENSE).
 

@@ -102,7 +102,7 @@ def run_layer(layer: str, wheel: Path) -> None:
         clean_environment.pop("PYTHONPATH", None)
         clean_environment["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
         checked_run(
-            [str(pip), "install", "--no-deps", str(wheel)],
+            [str(pip), "install", str(wheel)],
             cwd=root,
             environment=clean_environment,
         )

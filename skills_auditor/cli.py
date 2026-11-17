@@ -150,17 +150,17 @@ def _git(args: List[str], cwd: Path) -> Optional[str]:
             timeout=15,
         )
         return r.stdout.strip() if r.returncode == 0 else None
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except (subprocess.TimeoutExpired, OSError):
         return None
 
 
-def _porcelain_line_count(git_root: Path, pathspec: Optional[str]) -> int:
+def _porcelain_line_count(git_root: Path, pathspec: Optional[str]) -> Optional[int]:
     """Count porcelain lines; if pathspec is set, scope to that path under git_root."""
     args = ["status", "--porcelain"]
     if pathspec:
         args.extend(["--", pathspec])
     out = _git(args, git_root)
-    return len(out.splitlines()) if out else 0
+    return None if out is None else len(out.splitlines())
 
 
 def check_drift_for_path(name: str, path: Path) -> DriftStatus:
@@ -181,8 +181,8 @@ def check_drift_for_path(name: str, path: Path) -> DriftStatus:
 
     git_root_path = Path(git_root)
 
-    # Fetch latest remote state (quiet, non-blocking)
-    _git(["fetch", "--quiet"], git_root_path)
+    # A failed fetch must not certify cached remote state as current.
+    fetch_result = _git(["fetch", "--quiet"], git_root_path)
 
     branch = _git(["branch", "--show-current"], git_root_path) or "HEAD"
     remote_url = _git(["remote", "get-url", "origin"], git_root_path)
@@ -196,17 +196,32 @@ def check_drift_for_path(name: str, path: Path) -> DriftStatus:
     dirty_count = len(dirty_out.splitlines()) if dirty_out else 0
 
     skill_dirty_count = dirty_count
+    scoped_status_failed = False
     try:
         rel = resolved.relative_to(git_root_path)
         rel_spec = rel.as_posix()
         if rel_spec != ".":
-            skill_dirty_count = _porcelain_line_count(git_root_path, rel_spec)
+            scoped_count = _porcelain_line_count(git_root_path, rel_spec)
+            scoped_status_failed = scoped_count is None
+            skill_dirty_count = scoped_count if scoped_count is not None else 0
         # else: resolved path is repo root — skill scope equals full repo
     except ValueError:
         # Skill path outside git root (unusual); treat skill scope as full-repo count
         skill_dirty_count = dirty_count
 
-    synced = ahead == 0 and behind == 0 and dirty_count == 0
+    errors = []
+    if fetch_result is None:
+        errors.append("remote fetch failed")
+    if not remote_url:
+        errors.append("origin remote unavailable")
+    if branch == "HEAD":
+        errors.append("detached or unavailable branch")
+    if not (ahead_str and ahead_str.isdigit() and behind_str and behind_str.isdigit()):
+        errors.append("remote branch comparison unavailable")
+    if dirty_out is None or scoped_status_failed:
+        errors.append("working tree status unavailable")
+    error = "; ".join(errors) or None
+    synced = error is None and ahead == 0 and behind == 0 and dirty_count == 0
 
     # Build a human-friendly remote display: github URL without .git suffix
     display = local_str
@@ -218,7 +233,7 @@ def check_drift_for_path(name: str, path: Path) -> DriftStatus:
         branch=branch, ahead=ahead, behind=behind,
         dirty_count=dirty_count, skill_dirty_count=skill_dirty_count,
         synced=synced,
-        display_target=display,
+        display_target=display, error=error,
     )
 
 
@@ -298,11 +313,12 @@ def load_mapping(map_file: Path) -> Dict[str, str]:
 
 def parse_skill_name(skill_md: Path) -> str:
     text = skill_md.read_text(encoding="utf-8", errors="replace")
-    # Parse frontmatter first, then fallback to folder name. Slash names are
-    # valid logical names; sync-discover turns them into host-safe aliases.
-    match = re.search(r"(?m)^name:\s*[\'\"]?([^\'\"\n]+?)[\'\"]?\s*$", text)
-    if match:
-        return match.group(1).strip()
+    # Body examples are not metadata. Preserve logical slash names.
+    lines, error = _extract_frontmatter(text)
+    if error is None and lines is not None:
+        fields, _ = _parse_frontmatter_scalars(lines, skill_md)
+        if fields.get("name", "").strip():
+            return fields["name"].strip()
     return skill_md.parent.name
 
 
@@ -325,8 +341,31 @@ def _frontmatter_end_index(lines: List[str]) -> Optional[int]:
     return None
 
 
+def _strip_scalar_comment(value: str) -> str:
+    """Drop YAML comments outside quoted scalar content, preserving literal #."""
+    quote = None
+    escaped = False
+    for index, char in enumerate(value):
+        if escaped:
+            escaped = False
+            continue
+        if quote == '"' and char == "\\":
+            escaped = True
+            continue
+        if quote:
+            if quote == "'" and char == "'" and index + 1 < len(value) and value[index + 1] == "'":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in {"'", '"'} and index == 0:
+            quote = char
+        elif char == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index].rstrip()
+    return value.rstrip()
+
+
 def _clean_frontmatter_value(value: str) -> str:
-    value = value.strip()
+    value = _strip_scalar_comment(value.strip())
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1].strip()
     return value
@@ -369,7 +408,7 @@ def _parse_frontmatter_scalars(
             continue
 
         key = match.group(1).strip()
-        raw_value = match.group(2).strip()
+        raw_value = _strip_scalar_comment(match.group(2).strip())
         value = _clean_frontmatter_value(raw_value)
         if (
             raw_value not in {">", "|", ">-", "|-"}
@@ -605,7 +644,7 @@ def collect_metadata_repair_actions(
     return actions
 
 
-def iter_visible_skill_mds(skills_dir: Path) -> List[Path]:
+def iter_visible_skill_mds(skills_dir: Path, *, preserve_install_paths: bool = False) -> List[Path]:
     """Return visible SKILL.md files, following top-level skill symlinks.
 
     ``Path.rglob`` does not descend into symlinked directories on common Python builds,
@@ -630,7 +669,7 @@ def iter_visible_skill_mds(skills_dir: Path) -> List[Path]:
             except OSError:
                 continue
             if resolved.is_dir():
-                roots.append(resolved)
+                roots.append(child if preserve_install_paths else resolved)
         elif child.is_dir():
             roots.append(child)
 
@@ -725,11 +764,7 @@ def collect_duplicate_skill_names(skills_dir: Path) -> List[DuplicateSkillNameFi
     # name -> { resolved_realpath_str: representative Path }
     by_name: Dict[str, Dict[str, Path]] = {}
     try:
-        for skill_md in skills_dir.rglob("SKILL.md"):
-            if not _skill_md_under_visible_install_tree(skill_md, skills_dir):
-                continue
-            if _skill_md_path_is_under_ignored_segment(skill_md):
-                continue
+        for skill_md in iter_visible_skill_mds(skills_dir, preserve_install_paths=True):
             try:
                 real_key = str(skill_md.resolve())
             except OSError:
@@ -1050,19 +1085,18 @@ def route_pipeline(
             None,
         )
 
+        # Decide the fallback before emitting terminal routing transitions.
+        # A superseded variant cannot legally transition back to selected.
+        fallback = next((ps for ps, plat in routable if plat == PLATFORM_WILDCARD), str(primary))
+        selected_path = exact_match or (str(primary) if all_same_hash else fallback)
+
         for p_str, plat in routable:
             prev_state = (
                 VariantState.TRUE_DUPLICATE if all_same_hash
                 else VariantState.CLASSIFIED
             )
 
-            if exact_match:
-                is_selected = (p_str == exact_match)
-            elif all_same_hash:
-                is_selected = (p_str == str(primary))
-            else:
-                # No exact match — wildcard primary is fallback
-                is_selected = (plat == PLATFORM_WILDCARD)
+            is_selected = p_str == selected_path
 
             if is_selected and ident.final_selected is None:
                 ident.add_transition(StateTransition.create(
@@ -1071,7 +1105,8 @@ def route_pipeline(
                         f"exact match: platform '{plat}' == active '{active_platform}'"
                         if exact_match and not all_same_hash
                         else "primary selected (true duplicate)" if all_same_hash
-                        else f"wildcard fallback: no exact match for '{active_platform}'"
+                        else f"wildcard fallback: no exact match for '{active_platform}'" if plat == PLATFORM_WILDCARD
+                        else "fallback: no platform-specific variant matched, using primary"
                     ),
                 ))
                 ident.final_selected = p_str
@@ -1087,20 +1122,6 @@ def route_pipeline(
                     inferred_platform=plat,
                 ))
                 ident.final_superseded.append(p_str)
-
-        # If no variant was selected (e.g. all are for other platforms),
-        # fallback: select primary
-        if ident.final_selected is None and paths_sorted:
-            p_str = str(primary)
-            plat = variant_platforms.get(p_str, PLATFORM_WILDCARD)
-            # Undo the SUPERSEDED if primary was superseded
-            ident.final_selected = p_str
-            ident.add_transition(StateTransition.create(
-                p_str, VariantState.SUPERSEDED, VariantState.SELECTED,
-                reason="fallback: no platform-specific variant matched, using primary",
-            ))
-            if p_str in ident.final_superseded:
-                ident.final_superseded.remove(p_str)
 
         # ── Phase 4: Resolve — terminal states + build actions ──
         if ident.final_selected:
@@ -1868,6 +1889,13 @@ def default_sync_discover_sources(include_global_sources: bool) -> List[Path]:
     return sources
 
 
+def _validate_install_alias(name: str) -> None:
+    if (not isinstance(name, str) or not name or name in {".", ".."}
+            or "/" in name or "\\" in name
+            or any(ord(char) < 32 for char in name)):
+        raise ValueError("Skill install aliases must be a single nonempty folder name: {!r}".format(name))
+
+
 def plan_sync(
     skills_dir: Path,
     mapping: Dict[str, str],
@@ -1876,6 +1904,8 @@ def plan_sync(
     source_specs: Optional[List[SourceSpec]] = None,
 ) -> List[SyncAction]:
     actions: List[SyncAction] = []
+    for name in mapping:
+        _validate_install_alias(name)
     for name, target_str in mapping.items():
         entry = skills_dir / name
         target = Path(target_str).expanduser()
@@ -1963,6 +1993,8 @@ def plan_sync(
 
 
 def apply_actions(skills_dir: Path, actions: List[SyncAction]) -> None:
+    for action in actions:
+        _validate_install_alias(action.name)
     actionable = {"create_link", "replace_link", "archive_and_link"}
     from skills_auditor.lifecycle.guards import assert_legacy_mutation_allowed
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")

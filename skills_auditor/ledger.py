@@ -91,6 +91,10 @@ class LedgerFinding:
 
 
 def ledger_path(run_id: str, ledger_root: Optional[Path] = None) -> Path:
+    if (not isinstance(run_id, str) or not run_id or run_id in {".", ".."}
+            or "/" in run_id or "\\" in run_id
+            or any(ord(char) < 32 for char in run_id)):
+        raise ValueError("ledger run id must be a single nonempty filename component")
     root = ledger_root or DEFAULT_LEDGER_ROOT
     return root / f"{run_id}.json"
 

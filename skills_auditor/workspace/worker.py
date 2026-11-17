@@ -13,6 +13,8 @@ def main():
         if len(raw) > MAX_BYTES:
             raise LifecycleError("workspace_transport", "Request exceeds the 64 MiB transport bound.")
         request = decode_json(raw)
+        if not isinstance(request, dict):
+            raise LifecycleError("workspace_protocol", "Expected a JSON request object.")
         state_dir = request.get("state_dir")
         if not isinstance(state_dir, str) or not state_dir.startswith("/"):
             raise LifecycleError("workspace_state", "Select the target's absolute owner-local state directory.")
