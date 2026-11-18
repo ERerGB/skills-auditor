@@ -3,7 +3,7 @@ name: skills-auditor
 description: >
   Chat-native, plan-first governance for auditing and delivering AI skills to local, remote
   and cloud workspaces with native vendir locks and target-local registration. The agent chooses the integration or maintenance path from the operator's goal,
-  presents a reviewable plan, waits for explicit approval, applies only the reviewed scope, and
+  presents a reviewable plan, resolves authorization for its exact scope, applies only that scope, and
   verifies the result.
 ---
 
@@ -40,10 +40,12 @@ Use one visible lifecycle:
    host-visible skill roots. State material assumptions.
 2. **Plan** — run the appropriate plan-only command and summarize what is
    already aligned, what would change, and what would remain untouched.
-3. **Approve** — pause before mutation. Make the target scope, archival behavior,
-   network side effects, and any deletion explicit. A generic apply request never
-   authorizes deletion.
-4. **Apply** — after explicit approval, execute the reviewed plan or exact
+3. **Authorize** — compare the concrete plan with the current user’s already granted
+   scope. Make targets, archival behavior, network effects and deletion explicit.
+   Continue without asking again when that scope covers the reviewed changes; ask
+   only for a material new target, action or risk. Audit-only requests stay plan-only.
+   A generic apply request never authorizes deletion.
+4. **Apply** — within that authorization, execute the reviewed plan or exact
    maintenance scope. Do not broaden the target or rediscover a high-level
    integration plan.
 5. **Verify** — verify automatically after apply and return the receipt,
@@ -56,6 +58,12 @@ work for a genuinely empty plan. Empty filesystem steps alone are not sufficient
 approved governance change. Explicit renewal and legacy `noop` reapproval can
 issue a new version-bound receipt without rebuilding a link. Preserve their
 review, exact approval, execution and evidence steps; planning never issues approval.
+
+User consent and a version-bound CLI grant are separate: existing task authorization
+may cover a newly reviewed plan, but the agent must still inspect its exact bytes,
+targets and effects and pass the required current plan ID. An old receipt, environment
+default, or permission to audit does not authorize a new lifecycle change. Preserve
+explicit per-plan user gates where the current project or request requires them.
 
 ## Default behavior
 
@@ -145,7 +153,8 @@ Present the plan as a short operator summary before showing the artifact:
 - explicit exclusions and safety constraints;
 - exact approval phrase or apply command.
 
-Only after an explicit apply request:
+When the current request already authorizes this exact adoption scope, execute the
+reviewed plan and verify; otherwise present it and obtain the missing authorization:
 
 ```bash
 skills-audit apply .skills-auditor-local/plans/<plan-id>.json
@@ -279,8 +288,11 @@ Template: [`config/skills-auditor.pipeline.example.env`](config/skills-auditor.p
 | `SKILLS_AUDITOR_SYNC_MAP_FILE` | Optional authoritative map for the sync cycle |
 | `SKILLS_AUDITOR_CONFIG` | Environment file to source before resolving the above |
 
-Default maintenance roots, when no configuration is supplied, are `~/.cursor/skills` and
-`~/.claude/skills`.
+When no roots are configured, resolve the requested/current host’s actual discovery
+roots before auditing. For Codex inspect its current project/user `.agents/skills`
+and existing legacy `.codex/skills` registrations; include Cursor or Claude roots
+when those hosts are in scope. Pass the observed roots explicitly. Configuration
+examples using Cursor/Claude are not a reason to omit the active Codex catalog.
 
 ## Sub-skill system
 
