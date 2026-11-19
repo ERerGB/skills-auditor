@@ -437,7 +437,7 @@ def sensor_event_from_payload(
         skill_name=skill_name,
         skill_path=skill_path,
         transcript_path=_first_string(payload, ("transcript_path", "transcriptPath")),
-        call_id=_first_string(payload, ("tool_call_id", "call_id", "id")),
+        call_id=_first_string(payload, ("tool_use_id", "tool_call_id", "call_id", "id")),
         status=_first_string(payload, ("status", "outcome")),
         metadata=metadata,
     )

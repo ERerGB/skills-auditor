@@ -1,6 +1,6 @@
 {
   "name": "skill-trace",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Optional local skill usage sensor for Skills Auditor.",
   "author": {
     "name": "Skills Auditor"

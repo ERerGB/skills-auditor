@@ -5,63 +5,12 @@ description: >
   ~/.skills-auditor/traces/ and applies only with explicit authorization.
 ---
 
-# Skills Auditor — Route (cycle 3)
+# Route differing Skill variants
 
-## Before every invocation
+Run `skills-audit skill-trace check`; disabled capture is normal. Report an enabled capture gap once and continue. Do not change capture or hook trust incidentally.
 
-Run `skills-audit skill-trace check` before this cycle, including direct invocation.
-If capture is disabled, continue quietly. If enabled but unverified, stale, or errored,
-report the capture gap once and continue the cycle; do not auto-enable or trust hooks.
-See the [parent preflight contract](../../SKILL.md#before-every-invocation-optional-skill-trace-preflight).
+Use `skills-audit route --platform HOST --skills-dir ROOT --strategy archive` to plan selection among same-name variants. Scope to the actual host and inspect its inferred classification before application. The route model is DISCOVERED → CLASSIFIED → ROUTED → RESOLVED.
 
-## When to use
+Dry-run writes JSON traces (default `~/.skills-auditor/traces/`); pass `--trace-dir DIR` for an isolated record. It does not change Skill bodies. `archive` retains superseded entries as `SKILL.md.archived-TIMESTAMP`; `keep` retains them in place. `delete` is destructive and requires explicit deletion authorization, not merely general apply consent.
 
-- Duplicate `name:` with **different** content (multi-version) inside a bundle (e.g. gstack).
-- Scoped: “route Codex”, `SKILLS_AUDITOR_MODE=route`.
-
-## Model
-
-```
-DISCOVERED → CLASSIFIED → ROUTED → RESOLVED
-```
-
-Phases: hash variants → infer platform from path (e.g. `.agents/` → codex) → pick one identity → archive/delete/keep the rest.
-
-## Strategies
-
-| Strategy | Superseded files |
-|----------|------------------|
-| `archive` (default) | `SKILL.md.archived-<timestamp>` |
-| `delete` | removed |
-| `keep` | unchanged (audit-only) |
-
-## Commands
-
-```bash
-skills-audit route --platform cursor --skills-dir "$HOME/.cursor/skills" --strategy archive
-
-skills-audit route --platform codex --skills-dir "$HOME/.codex/skills" --strategy archive
-
-skills-audit route \
-  --platform cursor \
-  --skills-dir "$HOME/.cursor/skills" \
-  --strategy archive \
-  --apply
-
-skills-audit route \
-  --platform codex \
-  --skills-dir "$HOME/.codex/skills" \
-  --trace-dir ./my-traces
-```
-
-## Ledger behavior
-
-- Mode: dry-run writes route trace JSON but does not change skill files; `--apply` may archive, delete, or keep superseded variants based on `--strategy`.
-- Record the route cycle as a `skill-run` row. While work is open use `status=active`; after trace audit and any apply step, move it to `completed`, `handoff`, `blocked`, or `failed`.
-- Record the emitted state-machine trace as a `trace` row with `status=preserved` and `locator` set to the trace file path.
-- Applied archives/deletes should be recorded as `artifact` or `external-resource` rows with locators for the affected `SKILL.md` or archived path. Do not remove the route trace when cleaning up; the ledger points to it.
-- If routing cannot choose one active variant, mark the relevant row `blocked` with `--blocked-reason` or `handoff` with `--handoff-target`.
-
-## Parent
-
-[`../../SKILL.md`](../../SKILL.md) · Next: [`../traces/SKILL.md`](../traces/SKILL.md).
+Apply only a reviewed, authorized scope with `--apply`; do not bypass an existing managed owner. Inspect partial results after any failure. Run [trace QA](../traces/SKILL.md) and check actual host discovery before claiming one active route. Preserve trace files as evidence; unresolved selection stays unresolved. [Parent](../../SKILL.md).

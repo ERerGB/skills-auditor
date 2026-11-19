@@ -5,61 +5,16 @@ description: >
   to plan or apply relinking to canonical skill sources. Sub-skill of skills-auditor.
 ---
 
-# Skills Auditor — Sync (cycle 5)
+# Sync readable canonical Skill sources
 
-## Before every invocation
+Run `skills-audit skill-trace check`; disabled capture is normal. Report an enabled capture gap once and continue. Do not change capture or hook trust incidentally.
 
-Run `skills-audit skill-trace check` before this cycle, including direct invocation.
-If capture is disabled, continue quietly. If enabled but unverified, stale, or errored,
-report the capture gap once and continue the cycle; do not auto-enable or trust hooks.
-See the [parent preflight contract](../../SKILL.md#before-every-invocation-optional-skill-trace-preflight).
+For a maintained map, run `skills-audit sync --skills-dir ROOT --map-file FILE`; repeat roots as needed. The explicit map is authoritative. Inspect sources and current target owners before relinking. Plan by default; `--apply` requires the concrete authorized scope, and `SKILLS_AUDITOR_DRY_RUN=1` suppresses changes.
 
-## When to use
+For discovery-based replication, use `sync-discover --source SOURCE_ROOT --skills-dir INSTALL_ROOT`, repeating either flag as needed. Dry-run exits 1 for missing/stale entries, 5 for skipped unsafe actions, and 0 only when all discovered entries are current. Apply can create a missing install root. Slash names become top-level aliases; target roots are excluded from their own discovery so canonical directories are not replaced by self-links.
 
-- Operator has a maintained mapping file (see `config/sources.example.json`) or wants discovery-driven replication from source roots.
-- This cycle relinks sources already readable in the same target filesystem. For a new filesystem,
-  virtual environment or cloud host, use the parent [locked delivery workflow](../../SKILL.md#deliver-across-filesystems-and-restore-environments)
-  and [native vendir guide](../../docs/vendir-integration.md), then register locally. Do not copy absolute links across hosts.
-- Scoped: “sync dry-run”, `SKILLS_AUDITOR_MODE=sync`, `SKILLS_AUDITOR_SYNC_MAP_FILE`, or requests to replicate skills across agent environments.
+For first adoption, prefer the parent's `integrate` → exact `apply PLAN` → `verify RECEIPT`, which consumes reviewed bytes rather than rediscovering. Existing managed identities use their established lifecycle. Across filesystems/cloud hosts, follow [locked delivery](../../docs/vendir-integration.md); do not transport absolute symlinks or old approvals.
 
-## Commands
+In the legacy full pipeline, absent an explicit map, repository `.agents/.cursor/.claude` sources can register into `.codex/skills` when the repository has `.codex/`. Resolve actual scope first; override with `SKILLS_AUDITOR_DISCOVERY_SOURCES` and `SKILLS_AUDITOR_INSTALL_ROOTS` when needed.
 
-```bash
-skills-audit sync \
-  --skills-dir "$HOME/.cursor/skills" \
-  --map-file config/sources.example.json
-
-skills-audit sync \
-  --skills-dir "$HOME/.cursor/skills" \
-  --skills-dir "$HOME/.claude/skills" \
-  --map-file config/sources.example.json \
-  --apply
-
-skills-audit sync-discover \
-  --source .agents/skills \
-  --source .cursor/skills \
-  --source .claude/skills \
-  --skills-dir .codex/skills \
-  --skills-dir "$HOME/.codex/skills"
-```
-
-## Safety
-
-- Raw CLI and `/skills-auditor` both plan by default. The top skill adds `--apply` only after
-  explicit authorization or `SKILLS_AUDITOR_APPLY=1`; `SKILLS_AUDITOR_DRY_RUN=1` always wins.
-- For host adoption, prefer `integrate` → `apply <plan>` → `verify <receipt>` so apply consumes the
-  reviewed plan instead of rediscovering sources.
-- A `sync-discover` dry-run exits **1** when discovery entries are missing or stale, **5** for skipped unsafe actions, and **0** only when every discovered entry is already current. Apply creates a missing install root before registering entries.
-- In the top-level full pipeline, an explicit map remains authoritative. Without one, existing repository `.agents/.cursor/.claude` roots are discovered and registered into `.codex/skills` when the repository has a `.codex/` directory. Override with `SKILLS_AUDITOR_DISCOVERY_SOURCES` and `SKILLS_AUDITOR_INSTALL_ROOTS`.
-- `sync-discover` converts slash names to top-level install aliases and excludes each target root from its own generated plan to avoid replacing canonical local directories with self-links.
-
-## Ledger behavior
-
-- Mode: dry-run is read-only; `--apply` may create, replace, or relink skill entries in each target root.
-- Suggested rows: `skill-run` for the sync cycle, `external-resource` for the map file or discovery sources, and `artifact` rows for captured sync plans or applied link changes.
-- Applied link changes should include locators for the target skill root entries and metadata such as `action=create_link`, `replace_link`, or `archive_and_link`.
-- Skipped or unsafe actions should become `blocked` rows with the reason, or `handoff` rows when a human/operator must decide.
-
-## Parent
-
-[`../../SKILL.md`](../../SKILL.md).
+Verify links and source identity, then native host discovery separately. Record skipped/unsafe items without claiming completion. [Parent](../../SKILL.md).

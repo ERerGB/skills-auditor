@@ -132,6 +132,14 @@ def main() -> int:
         if not args.dry_run:
             cwd = Path(event.cwd).expanduser() if event.cwd else Path.cwd()
             write_sensor_event(event, log_root(cwd, args.log_dir))
+            # Pilot failure must not suppress ordinary capture or block the task.
+            try:
+                from skills_auditor.handbook_pilot import observe_hook
+                notice = observe_hook(event, payload)
+                if notice and not args.print_event:
+                    print(json.dumps(notice, ensure_ascii=False))
+            except Exception as exc:
+                print(f"skill-trace handbook pilot skipped: {type(exc).__name__}", file=sys.stderr)
         if args.dry_run or args.print_event:
             print(json.dumps(event.to_dict(), ensure_ascii=False, sort_keys=True))
         return 0

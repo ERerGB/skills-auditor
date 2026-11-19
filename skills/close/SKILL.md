@@ -5,38 +5,12 @@ description: >
   dedup/route/sync. Sub-skill of skills-auditor.
 ---
 
-# Skills Auditor — Close (cycle 6)
+# Verify the maintenance result
 
-## Before every invocation
+Run `skills-audit skill-trace check`; disabled capture is normal. Report an enabled capture gap once and continue. Do not change capture or hook trust incidentally.
 
-Run `skills-audit skill-trace check` before this cycle, including direct invocation.
-If capture is disabled, continue quietly. If enabled but unverified, stale, or errored,
-report the capture gap once and continue the cycle; do not auto-enable or trust hooks.
-See the [parent preflight contract](../../SKILL.md#before-every-invocation-optional-skill-trace-preflight).
+Repeat `skills-audit audit --skills-dir ROOT` over the same roots inspected at the start. Add `--with-drift` only when remote source alignment is part of the task; it can fetch Git remotes.
 
-## When to use
+Check the expectations relevant to the performed work: metadata, duplicate/routing decisions, selected source revisions, installed bytes and any sync/transaction receipts. Verify native discovery separately where installation changed. An unchanged filesystem audit does not prove successful model or device execution.
 
-- Final leg of full pipeline after cycles 1–5 (or 1–4 if sync skipped).
-- Scoped: `SKILLS_AUDITOR_MODE=close`.
-
-## Commands
-
-Same as discover: re-run `skills-audit audit` with the same `--skills-dir` list as cycle 1, including `--with-drift` when drift matters.
-
-```bash
-skills-audit audit \
-  --skills-dir "$HOME/.cursor/skills" \
-  --skills-dir "$HOME/.claude/skills" \
-  --with-drift
-```
-
-## Ledger behavior
-
-- Mode: read-only, except optional `git fetch` during drift checks.
-- Suggested row: final `skill-run` for close verification with `status=completed` only when duplicate, metadata, drift, trace, and sync expectations are acceptable for the run.
-- If any previous cycle left `active`, `failed`, or unreasoned `blocked` rows, run `skills-audit ledger-check` and update or hand off those rows before closing.
-- Close does not delete artifacts, route traces, or local logs; record cleanup as a separate `handoff` if retention work is needed.
-
-## Parent
-
-[`../../SKILL.md`](../../SKILL.md) · Detail: [`../discover/SKILL.md`](../discover/SKILL.md).
+For delegated runs, inspect `ledger-check` and resolve or hand off active, failed and unexplained blocked resources. Report incomplete checks explicitly. Retain plans, traces, backups and local logs; closing a run does not authorize deleting them. [Parent](../../SKILL.md).

@@ -2541,6 +2541,7 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     p_record_trigger.add_argument("--trace-path", default="", help="Referenced state-machine trace path.")
     p_record_trigger.add_argument("--notes", default="", help="Short operator note.")
 
+    sub.add_parser("handbook-pilot", help="Experimental bounded real-use handbook calibration pilot")
     p_skill_trace = sub.add_parser("skill-trace", help="Control and check only the optional Skill Trace plugin")
     p_skill_trace.add_argument("action", choices=("enable", "disable", "status", "check"))
     p_skill_trace.add_argument("--log-dir", help="Sensor log root; defaults to SKILLS_AUDITOR_LOG_DIR or .skills-auditor-local")
@@ -2838,6 +2839,9 @@ def _main(prog: Optional[str] = None) -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "lifecycle":
         from skills_auditor.lifecycle.cli import main as lifecycle_main
         return lifecycle_main(sys.argv[2:], prog=(prog or "skills-audit") + " lifecycle")
+    if len(sys.argv) > 1 and sys.argv[1] == "handbook-pilot":
+        from skills_auditor.handbook_pilot import main as pilot_main
+        return pilot_main(sys.argv[2:])
     parser = build_parser(prog=prog)
     args = parser.parse_args()
     if args.command in {"metadata-repair", "sync", "sync-discover", "dedup", "route"} and args.apply:
