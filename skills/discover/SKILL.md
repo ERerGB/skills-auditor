@@ -5,69 +5,14 @@ description: >
   drift-check, and optional audit-discovery with a profile file. Sub-skill of skills-auditor.
 ---
 
-# Skills Auditor — Discover (cycle 1)
+# Discover installed Skill state
 
-## Before every invocation
+Run `skills-audit skill-trace check`; disabled capture is normal. Report an enabled capture gap once and continue. Do not change capture or hook trust incidentally.
 
-Run `skills-audit skill-trace check` before this cycle, including direct invocation.
-If capture is disabled, continue quietly. If enabled but unverified, stale, or errored,
-report the capture gap once and continue the cycle; do not auto-enable or trust hooks.
-See the [parent preflight contract](../../SKILL.md#before-every-invocation-optional-skill-trace-preflight).
+Inspect the actual requested host roots with `skills-audit audit --skills-dir ROOT` (repeat the flag for multiple roots). Resolve Codex's current `.agents/skills` and legacy `.codex/skills` routes rather than assuming a different host's defaults. The recursive scanner includes sibling packages and nested duplicate names.
 
-## When to use
+Report missing/broken links, missing bodies, invalid metadata and duplicate identities. This is filesystem discovery, not proof that the native client loads or follows a Skill.
 
-- Scoped request: “audit only”, “drift check”, “discovery profile”, first leg of pipeline.
-- Operator narrowed `SKILLS_AUDITOR_MODE=discover` (see top [`SKILL.md`](../../SKILL.md)).
+Only when source drift matters, add `--with-drift` or use `drift-check`; these can run `git fetch`. Non-Git entries are skipped for drift. For multi-source precedence/collision analysis, use `audit-discovery --profile-file FILE`; inspect the actual profile before relying on `--fail-on-conflict` or `--fail-on-hash-conflict`.
 
-## Commands
-
-Install with `python -m pip install .` from the repository root, or use the no-install entry
-`python3 scripts/skills_audit.py`. Reserve editable installs for repository development.
-
-```bash
-# Basic audit (repeat --skills-dir for each root)
-skills-audit audit --skills-dir "$HOME/.cursor/skills"
-
-skills-audit audit \
-  --skills-dir "$HOME/.cursor/skills" \
-  --skills-dir "$HOME/.claude/skills" \
-  --with-drift
-
-skills-audit drift-check --skills-dir "$HOME/.cursor/skills"
-```
-
-## Optional — discovery-layer audit
-
-When multi-source collision maps matter:
-
-```bash
-skills-audit audit-discovery \
-  --profile-file config/discovery-profile.multisource.example.json
-
-skills-audit audit-discovery \
-  --profile-file config/discovery-profile.multisource.example.json \
-  --summary-only \
-  --fail-on-conflict \
-  --fail-on-hash-conflict
-```
-
-## Outputs to hand off
-
-- Tables: `link_status`, `has_skill_md`, duplicate `name:` **install-root** status (Slash-style recursive scan), optional drift columns.
-- JSON blocks in CLI output for scripting.
-
-## Ledger behavior
-
-- Mode: read-only, except optional `git fetch` during drift checks.
-- Suggested row: `skill-run` for the discover cycle, `completed` when the audit exits cleanly.
-- Drift checks may record each checked repository as `external-resource` with metadata for branch/ahead/behind/dirty counts.
-- No cleanup is expected; unresolved drift or metadata failures should be recorded as `blocked` or `failed` with a reason.
-
-## Drift behavior
-
-- Symlinked skills with git context: `git fetch`, report synced vs DRIFT (`ahead` / `behind` / `dirty`).
-- Plain directories without git: drift skipped for those entries.
-
-## Parent
-
-Return to full pipeline: [`../../SKILL.md`](../../SKILL.md).
+Return the roots, findings and requested next action. Do not repair or register during a read-only audit. [Parent and authorization](../../SKILL.md).

@@ -9,355 +9,76 @@ description: >
 
 # Skills Auditor
 
-> Bring the same AI skills to every workspace.
-
-Ask once. Review the plan. Approve the change. Get a verified result.
-
-## Interaction contract
-
-Treat `/skills-auditor` as the product entry point, not as a request for the
-operator to select CLI primitives. Translate the operator's goal into the
-smallest safe workflow:
-
-| Operator goal | Preferred path |
-| --- | --- |
-| “Bring these skills to this workspace” | Integrate canonical sources into the current host |
-| “Audit the skills in this workspace” | Inspect active roots and plan the relevant maintenance |
-| “Fix metadata, duplicates, or variants” | Run only the matching maintenance cycle |
-| “Sync this authoritative mapping” | Run mapped sync against the named map |
-| “Move or restore this Skill in another filesystem or cloud environment” | Follow native locked delivery and target-local acceptance |
-| “Keep approved bytes stable while I edit” or “Manage this installed version” | Use the managed lifecycle, preserving candidate/active separation |
-| “This managed Skill is warning or an update was interrupted” | Read status and transaction evidence before proposing recovery |
-| “Manage one baseline with project exceptions across environments” | Use workspace declarations and target-local managed plans |
-
-Do not lead with cycle names, flags, plan IDs, or schemas. First explain the
-observed state and intended result in the operator's language; show commands and
-artifacts as review evidence.
-
-Use one visible lifecycle:
-
-1. **Inspect** — resolve the current workspace, host, canonical sources, and
-   host-visible skill roots. State material assumptions.
-2. **Plan** — run the appropriate plan-only command and summarize what is
-   already aligned, what would change, and what would remain untouched.
-3. **Authorize** — compare the concrete plan with the current user’s already granted
-   scope. Make targets, archival behavior, network effects and deletion explicit.
-   Continue without asking again when that scope covers the reviewed changes; ask
-   only for a material new target, action or risk. Audit-only requests stay plan-only.
-   A generic apply request never authorizes deletion.
-4. **Apply** — within that authorization, execute the reviewed plan or exact
-   maintenance scope. Do not broaden the target or rediscover a high-level
-   integration plan.
-5. **Verify** — verify automatically after apply and return the receipt,
-   resulting topology, unresolved findings, and a concise outcome.
-
-Stop as already aligned only when a reviewed plan has neither filesystem changes
-nor authorization, lifecycle, policy or other governance changes. Do not invent
-work for a genuinely empty plan. Empty filesystem steps alone are not sufficient:
-`revoke` persists denial without touching a link, and an override is a separately
-approved governance change. Explicit renewal and legacy `noop` reapproval can
-issue a new version-bound receipt without rebuilding a link. Preserve their
-review, exact approval, execution and evidence steps; planning never issues approval.
-
-User consent and a version-bound CLI grant are separate: existing task authorization
-may cover a newly reviewed plan, but the agent must still inspect its exact bytes,
-targets and effects and pass the required current plan ID. An old receipt, environment
-default, or permission to audit does not authorize a new lifecycle change. Preserve
-explicit per-plan user gates where the current project or request requires them.
-
-## Default behavior
-
-When the operator invokes `/skills-auditor` without a narrower request:
-
-1. Load `SKILLS_AUDITOR_CONFIG` when it points to an environment file.
-2. Infer integration or maintenance intent from the request and current
-   workspace. Prefer the high-level `integrate` transaction for adoption.
-3. Use the requested cycle, or the full maintenance pipeline only for a broad
-   audit request when `SKILLS_AUDITOR_MODE` is unset or `full`.
-4. Keep definition and install-root changes in plan mode by default.
-5. Pass `--apply` only when the operator explicitly asks to apply changes or
-   `SKILLS_AUDITOR_APPLY=1`.
-6. `SKILLS_AUDITOR_DRY_RUN=1` is a compatibility override that always suppresses apply.
-
-`route` dry-runs still write trace evidence. `audit --with-drift` still fetches Git remotes.
-Disclose those side effects before running them. Neither changes a skill
-definition or install root.
+Turn the operator's maintenance request into a concrete plan, execute only its authorized scope, and verify the result. Installed directories are runtime routes; canonical repositories own maintained content.
 
 ## Before every invocation: optional Skill Trace preflight
 
-After loading any `SKILLS_AUDITOR_CONFIG`, and before the requested workflow, run:
+Load `SKILLS_AUDITOR_CONFIG` if explicitly configured, then run `skills-audit skill-trace check`. This independent check works even when hooks do not run. Disabled capture is normal; report an enabled-but-unverified/stale/error gap once and continue. Missing events do not prove non-use. Never enable capture or alter hook trust as an incidental preflight. See [capture controls](docs/install.md#optional-skill-trace-plugin) when the operator requests them.
+
+## Choose the smallest applicable path
+
+| Request | Execute / read |
+|---|---|
+| Adopt canonical sources into this host | `integrate` → reviewed `apply PLAN` → `verify RECEIPT`; [integration contract](docs/integration-contract.md) |
+| Inspect metadata, duplication or variants | Only the requested [maintenance cycle](#maintain-existing-install-roots) |
+| Manage an existing approved installation | [Managed lifecycle](docs/managed-lifecycle.md); preserve its owner and stable installation ID |
+| Shared baseline with project exceptions across hosts | [Workspace management](docs/workspace-management.md); prepare/apply the exact target-local plan |
+| Deliver across filesystems or restore a target | [Locked delivery](#deliver-across-filesystems-and-restore-environments) |
+| Rewrite a Skill manual and learn from execution | [Bounded handbook calibration](docs/handbook-calibration.md) |
+| Inspect an explicitly enabled real-use pilot | `skills-audit handbook-pilot status`; [experimental pilot](docs/handbook-pilot.md) |
+
+For an audit, discover the current host's actual roots. Codex may expose project/user `.agents/skills` and existing `.codex/skills` aliases. Include other hosts only when in scope. A recursive filesystem listing is not native host discovery. Inspect an existing target before choosing adoption versus managed maintenance.
+
+## Plan, authorization and verification
+
+1. Inspect the source identity, actual target, existing owner and current bytes. A writable copy or fork does not establish ownership. Honor the operator's maintained/third-party boundary.
+2. Generate a plan for the requested path. Explain its actual filesystem, archival, network and governance effects. `route` dry-run writes trace files; drift checks can fetch remotes.
+3. Match that concrete plan against authorization already given. Continue when covered; resolve only missing scope. User consent and a version-bound CLI grant are separate: inspect the exact plan and provide its current ID where required. Old receipts and environment defaults cannot approve a changed managed plan. Generic apply authorization does not authorize deletion.
+4. Apply that plan, then verify automatically. Do not broaden targets or rediscover another integration plan during apply. On interrupted or uncertain effects, inspect the transaction/receipt and affected targets before any retry; managed recovery follows its explicit resume/compensation protocol.
+5. Report changed/unchanged/unresolved results with source, installed and native-discovery evidence separately. Local hashes do not establish real device/cloud or semantic workflow success.
+
+An operation is already aligned only when both filesystem and governance effects are empty. Renewal, revocation and overrides can matter without file changes. Preserve unrelated work and private runtime state.
+
+## Integrate canonical sources into hosts
 
 ```bash
-skills-audit skill-trace check
+skills-audit integrate --source /absolute/canonical/skills --target codex
+skills-audit apply /absolute/generated-plan.json
+skills-audit verify /absolute/generated-receipt.json
 ```
 
-This is an agent entry pre-hook, independent of Codex dispatching plugin hooks. It also runs
-when the plugin hooks are untrusted or absent. The CLI automatically performs the same read-only
-check before ordinary commands inside Codex; directly invoked sub-skills follow this contract too.
+The plan command prints its exact apply command and target paths. Use the plan's actual receipt, not these example filenames. Apply verifies the planned source-tree hashes and target snapshots. Initial stale preconditions exit 3 before effects; a later stale action can follow completed earlier actions. Inspect partial receipts before resuming.
 
-- `disabled`: continue quietly. Capture is optional and off by default.
-- `healthy`: recent plugin tool-before and tool-after events exist for this task and directory.
-- `unverified`, `stale`, or `error`: report the capture gap once, then continue the requested audit.
-  Do not treat missing evidence as no skill use or as proof that trust is missing.
+Use `--target cursor`, `claude-code`, or `codex`; `@global` selects home scope. `--target-root NAME=PATH` selects an explicit host root. Existing managed identities must use their lifecycle rather than legacy relinking. See [integration configuration](docs/integration-contract.md) for non-default layouts and outer dependencies.
 
-Never enable capture, grant hook trust, or change Codex-wide hook settings as part of preflight.
-Never use a synthetic event or `--dry-run` as evidence that the host dispatches hooks.
-Use `skills-audit skill-trace enable` or `disable` only when the operator requests that preference.
-The switch affects only Skill Trace capture, preserving existing logs and ordinary auditing.
-See [plugin installation and trust](docs/install.md#optional-skill-trace-plugin).
+## Manage approved versions
 
-## Choose one path
+Keep candidate bytes separate from active approved snapshots. Use fresh managed/workspace plans and exact `--approve-plan-id` grants; never edit or sync behind an active snapshot, silently migrate its owner, or reuse old approval for a new version. A restored file alone does not clear revocation or invalidation. Inspect fresh preflight plus transaction history for warnings or interruption; follow [lifecycle recovery](docs/managed-lifecycle.md).
 
-### Manage multiple workspaces and environments
+Managed integrity/grants, host hook trust and optional capture are independent. Cross-host atomicity and native discovery require their own evidence. Read [Grok host acceptance](docs/grok-environments.md) only for an explicitly selected Grok target; Cursor acceptance means Cursor CLI, not every client.
 
-Follow [workspace management](docs/workspace-management.md) for a shared baseline
-with explicit project exceptions across local or existing SSH environments.
-Potology is an optional identity/route adapter, never a core dependency. Keep
-source definitions and exceptions in repository declarations; machine paths,
-connection references, snapshots and receipts belong to private runtime state.
+## Deliver across filesystems and restore environments
 
-Read status, prepare `workspace plan`, and show source content IDs, workspace and
-platform targets, exceptions, migration scope and rollback versions. Apply only
-the exact reviewed plan with `--approve-plan-id`; then verify file integrity and
-native CLI loading separately. The user's explicit implementation/apply request
-can authorize that scoped execution; do not ask the same permission again.
-Unknown results require journal inspection before an explicitly approved resume.
-Preserve old readable entries and tracked repository changes until their explicit
-migration is reviewed. Do not treat filesystem checks as native client acceptance.
-Cursor acceptance covers Cursor CLI. Grok Build is an explicit `grok` host opt-in;
-use `workspace verify --native grok` for catalog/read evidence, preserving native
-login and folder trust. See [Grok Build](docs/grok-environments.md).
-Plugin packages, hooks, context and statistics
-are excluded from this workflow; do not flatten plugin-owned Skills into releases.
+Keep native vendir configuration and lock together. Materialize a new reviewed delivery; preserve its repository layout and actual outer dependencies. Apply a fresh plan in the receiving host rather than copying absolute links, old grants or login state. Read the [vendir delivery guide](docs/vendir-integration.md) before changing delivery or recovery.
 
-### Integrate canonical sources into hosts
+Verify through the receiving agent: native discovery, actual entrypoint/reference reads and a bounded useful operation. Keep source hashes, runtime identity and command exits. A controller-side read or catalog entry alone does not prove acceptance. Preserve independent locked inputs and source objects for recovery; a replaced machine is not automatically restored native conversation state. Network access, credentials and paid resource creation require their applicable authorization.
 
-Prefer the high-level transaction for adoption and host registration. Infer the
-current project host when it is unambiguous; otherwise present the resolved
-choices in user-facing names before asking for a target.
+## Maintain existing install roots
 
-```bash
-skills-audit integrate \
-  --source canonical/skills \
-  --target codex
-```
+| Scope | Plan/read command | Important effect |
+|---|---|---|
+| Metadata | `metadata-repair --platform codex --skills-dir ROOT` | Apply repairs safe metadata only; unsupported cases exit 5 |
+| [Discover](skills/discover/SKILL.md) | `audit --skills-dir ROOT` | `--with-drift` adds remote fetch |
+| [Dedup](skills/dedup/SKILL.md) | `dedup --skills-dir ROOT` | Identical hashes only; whole root including siblings |
+| [Route](skills/route/SKILL.md) | `route --platform codex --skills-dir ROOT --strategy archive` | Writes traces even without apply; deletion requires explicit authorization |
+| [Trace QA](skills/traces/SKILL.md) | `audit-state-machine --trace-dir DIR` | Routing traces, not proof of semantic Skill use |
+| [Sync](skills/sync/SKILL.md) | `sync --skills-dir ROOT --map-file FILE` | Explicit map remains authoritative |
+| [Close](skills/close/SKILL.md) | Repeat the scoped audit | Verify applicable expectations; retain evidence |
 
-The command exits `0`, writes a `skills-auditor-plan/v1` file under
-`.skills-auditor-local/plans/`, and prints the exact apply command. It does not change the target.
+Primitive mutation commands plan by default. Use `--apply` only within authorized scope. `SKILLS_AUDITOR_DRY_RUN=1` always suppresses application. `SKILLS_AUDITOR_APPLY=1` does not supersede managed plan/grant checks. Resolve concrete roots; never use a home or repository root as a destructive target. For a requested full legacy maintenance pipeline, order metadata → discover → dedup → route → trace QA → optional sync → close. A narrow request needs only its relevant cycle.
 
-Present the plan as a short operator summary before showing the artifact:
+## Evidence and installation
 
-- source skills being adopted;
-- destination workspace and host;
-- entries that will link, archive, or remain unchanged;
-- explicit exclusions and safety constraints;
-- exact approval phrase or apply command.
+For delegated or multi-step work, track resources with `ledger-create`, `ledger-upsert`, `ledger-check` and `ledger-summary`; store locators to plans/receipts/traces, not copied payloads. Keep raw prompts and credentials out of logs. See CLI `--help` for the chosen operation's actual flags and [cycle index](skills/README.md).
 
-When the current request already authorizes this exact adoption scope, execute the
-reviewed plan and verify; otherwise present it and obtain the missing authorization:
-
-```bash
-skills-audit apply .skills-auditor-local/plans/<plan-id>.json
-skills-audit verify .skills-auditor-local/receipts/<receipt-id>.json
-```
-
-`apply` validates full source-tree hashes and target-entry snapshots from the reviewed plan. It never
-rediscovers sources. Initial stale preconditions exit `3` before effects; a later per-action
-`stale_plan` may follow earlier completed actions. Inspect the receipt and all planned targets.
-
-Run `verify` as part of the approved interaction. Do not require a second
-operator request to verify the outcome.
-
-Use `--target cursor`, `--target claude-code`, or `--target codex` for project roots. Append
-`@global` for the corresponding home root. Use `--target-root NAME=PATH` for an unregistered host.
-
-An optional repository `skills-auditor.json` can replace repeated source and target flags. Its
-contract is documented in [`docs/integration-contract.md`](docs/integration-contract.md).
-
-### Deliver across filesystems and restore environments
-
-Follow [native vendir delivery](docs/vendir-integration.md) for a new target filesystem,
-virtual environment or cloud host. Keep vendir's configuration and lock as the delivery contract;
-Auditor adds only explicit dependency acceptance and target-local registration.
-
-1. Resolve the actual target runtime and its Agent tool-visible storage. Confirm source access,
-   runtime prerequisites, authorization and any paid resource limits before provisioning.
-2. Materialize the reviewed source with `vendir sync --locked` in a new delivery directory.
-   Retain the whole required repository layout; a lone SKILL.md may depend on outer tools or docs.
-3. Declare reviewed external files through `required_files` / `--require-file`. Inspect their
-   byte/permission hashes and the host target in the integration plan. This is bounded dependency
-   acceptance, not automatic dependency discovery or publisher authentication.
-4. Apply within the current authorized scope, then verify. Regenerate plans, receipts and symlinks
-   on each target; do not transport a source host's absolute registrations or approvals.
-5. Start a fresh target Agent and verify catalog discovery, actual Skill/template reads and a
-   bounded useful operation. Require successful tool outputs, actual cwd/HEAD/origin and dependency
-   digests; catalog presence, a controller-side read or process exit alone is insufficient.
-6. For recovery, retain native inputs and fixed source objects outside the disposable delivery.
-   Record provider/container identity, prove old delivery absence, restore from the same lock,
-   compare content and executable bits, re-register and repeat actual Agent acceptance. Report
-   in-place rebuild and whole-instance replacement separately; preserve failed observations.
-
-Do not sync content behind an active registration. Create a new candidate and review its local
-activation. Already managed installations must use their existing lifecycle protocol; legacy
-integration must not bypass managed guards, renew revoked approval or relocate snapshots that
-still rely on repository-relative outer dependencies. Cross-host atomicity is not promised.
-Credentials, paid resources, capture, hooks and trust remain environment/operator responsibilities.
-Keep evidence private and clean up only owned temporary resources. The [cloud experiment](experiments/vendir-potology/CLOUD.md)
-records a real Codespaces replacement recovery and the unresolved in-place rebuild boundary.
-
-### Manage approved versions and recover interrupted changes
-
-Read [`docs/managed-lifecycle.md`](docs/managed-lifecycle.md) for managed installation,
-candidate promotion, status/preflight, version selection, revocation or recovery.
-Use this protocol for an already managed installation; do not silently fall back
-to legacy relinking, metadata repair or direct snapshot edits after a failure.
-
-- Identify the project state owner and stable installation ID. A changed path
-  or display name is not a new identity.
-- Keep a candidate edit separate from the active approved snapshot. Do not
-  promote H2 just because H1 exists or was approved previously.
-- Save and review the managed plan before passing its exact ID to
-  `lifecycle apply --approve-plan-id`. Maintenance environment defaults do not
-  replace this per-plan approval. Revoke, renew and rollback are explicit changes.
-- Verify after apply and use fresh `lifecycle preflight` before an integrated
-  host consumes the Skill. Surface warning, unknown or blocked status and the
-  investigation/recovery entry; do not hide it behind an earlier successful receipt.
-- For interrupted work, inspect the recorded transaction first. Resume or
-  compensate only after the operator explicitly approves that recovery scope.
-  Preserve foreign entries and record unresolved partial effects.
-- Restored bytes do not clear managed invalidation or revocation. A historical
-  receipt is evidence, not current authorization; a completed change needs a new
-  reviewed inverse operation, not an automatic replay of old approval.
-
-Managed checks and investigation records stay local. Do not attach raw prompts,
-environment dumps or credentials as troubleshooting evidence. Actor/tool labels
-identify the reported local caller, not an authenticated person. A host that
-bypasses preflight is not claimed to be blocked.
-
-### Maintain existing install roots
-
-Use the primitive cycles when the request is specifically about metadata, duplicate identities,
-platform variants, traces, or an existing source map. These are implementation
-tools behind the chat interaction, not prerequisites the operator must learn.
-
-| Cycle | Plan command | Apply behavior |
-| --- | --- | --- |
-| Metadata repair | `skills-audit metadata-repair --platform codex --skills-dir <root>` | Add `--apply` only when explicitly authorized |
-| Discover | `skills-audit audit --skills-dir <root>` | Read-only; add `--with-drift` only when remote fetch is intended |
-| Dedup | `skills-audit dedup --skills-dir <root>` | Apply relinks only identical hashes |
-| Route | `skills-audit route --platform <host> --skills-dir <root> --strategy archive` | Apply archives superseded variants by default |
-| Trace QA | `skills-audit audit-state-machine` | Read-only over route traces |
-| Mapped sync | `skills-audit sync --skills-dir <root> --map-file <file>` | Apply the reviewed mapping plan |
-| Close | repeat `audit` | Confirm final topology and metadata |
-
-The full maintenance order is:
-
-```text
-metadata-repair → audit → dedup → route → trace QA → optional sync → closing audit
-```
-
-Do not use `--strategy delete` unless the operator explicitly requested deletion. An apply request
-does not imply permission to delete.
-
-## Scope rules
-
-- Each `--skills-dir` is one host-visible install root. Duplicate-name checks recurse through the
-  whole root, including sibling packs.
-- Codex metadata requires fenced frontmatter with non-empty `name` and `description`.
-- `metadata-repair` handles only safe, idempotent repairs. Unsupported malformed frontmatter is
-  skipped and exits `5`.
-- `dedup` relinks same-hash definitions. Different hashes remain separate and move to `route`.
-- Host integration creates symlinks. An existing native entry is timestamp-archived before
-  linking; a matching link becomes `noop`.
-- Syntax, provenance, and lifecycle evidence do not prove semantic skill use or runtime behavior.
-
-## Configuration
-
-Template: [`config/skills-auditor.pipeline.example.env`](config/skills-auditor.pipeline.example.env).
-
-| Variable | Purpose |
-| --- | --- |
-| `SKILLS_AUDITOR_ROOTS` | Space-separated maintenance roots |
-| `SKILLS_AUDITOR_EXTRA_ROOTS` | Additional maintenance roots |
-| `SKILLS_AUDITOR_MODE` | `full`, `metadata-repair`, `discover`, `dedup`, `route`, `traces`, `sync`, or `close` |
-| `SKILLS_AUDITOR_APPLY` | `1` permits apply for the requested maintenance run |
-| `SKILLS_AUDITOR_DRY_RUN` | `1` forces plan-only behavior; compatibility override |
-| `SKILLS_AUDITOR_WITH_DRIFT` | `1` enables remote-backed drift checks |
-| `SKILLS_AUDITOR_ROUTE_PLATFORMS` | Comma-separated route platforms |
-| `SKILLS_AUDITOR_ROUTE_STRATEGY` | `archive` or `keep`; use `delete` only with explicit operator wording |
-| `SKILLS_AUDITOR_SYNC_MAP_FILE` | Optional authoritative map for the sync cycle |
-| `SKILLS_AUDITOR_CONFIG` | Environment file to source before resolving the above |
-
-When no roots are configured, resolve the requested/current host’s actual discovery
-roots before auditing. For Codex inspect its current project/user `.agents/skills`
-and existing legacy `.codex/skills` registrations; include Cursor or Claude roots
-when those hosts are in scope. Pass the observed roots explicitly. Configuration
-examples using Cursor/Claude are not a reason to omit the active Codex catalog.
-
-## Sub-skill system
-
-| Cycle | Instructions |
-| --- | --- |
-| Discover | [`skills/discover/SKILL.md`](skills/discover/SKILL.md) |
-| Dedup | [`skills/dedup/SKILL.md`](skills/dedup/SKILL.md) |
-| Route | [`skills/route/SKILL.md`](skills/route/SKILL.md) |
-| Trace QA | [`skills/traces/SKILL.md`](skills/traces/SKILL.md) |
-| Sync | [`skills/sync/SKILL.md`](skills/sync/SKILL.md) |
-| Close | [`skills/close/SKILL.md`](skills/close/SKILL.md) |
-
-Index: [`skills/README.md`](skills/README.md).
-
-## Evidence and handoff
-
-Use execution ledgers for multi-step or delegated maintenance runs:
-
-```bash
-skills-audit ledger-create --run-id <run-id> --source <orchestrator> --mode dry-run
-skills-audit ledger-upsert --run-id <run-id> \
-  --id <resource-id> --class skill-run --locator <command-or-path> \
-  --owner <owner> --status completed
-skills-audit ledger-check --run-id <run-id>
-skills-audit ledger-summary --run-id <run-id>
-```
-
-Keep route traces as `trace` resources and plan/receipt files as `artifact` resources. Do not copy
-their payloads into the ledger.
-
-For the operator-facing response, summarize evidence in this order:
-
-1. outcome;
-2. changed, unchanged, and unresolved counts;
-3. safety-relevant archives or skips;
-4. receipt and verification locations;
-5. the next action only when one remains.
-
-Do not make raw ledger or receipt payloads the primary explanation.
-
-## Isolation and safety
-
-- Legacy plan-only work can run in read-only isolation, except that route may write traces and
-  integrate writes a plan under `.skills-auditor-local/`.
-- Managed planning needs access to its project state: it may initialize records, save the requested
-  plan and persist an active-state observation or denial. It never changes installation pointers
-  or candidate files and never grants approval. Candidate errors alone do not invalidate healthy
-  active bytes; `plan revoke` does not require content inspection.
-- Apply work needs write access to the exact source or target roots in scope.
-- Resolve every target before applying. Never use a home directory, repository root, or unresolved
-  variable as a destructive target.
-- A failed legacy high-level apply writes a failed receipt with completed actions and the error
-  when the filesystem permits it. Managed failures instead retain their write-ahead transaction
-  and recovery reference; only completed managed transactions receive a success receipt.
-
-## Install
-
-From the repository:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install .
-skills-audit --version
-```
-
-Use `python -m pip install -e .` only when developing skills-auditor itself. The no-install entry
-is `python3 scripts/skills_audit.py`.
+Use an existing compatible CLI. If missing, follow [installation](docs/install.md), or run `python3 scripts/skills_audit.py` from this repository. Editable installation is for developing Auditor, not a prerequisite for each audit.

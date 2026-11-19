@@ -5,40 +5,12 @@ description: >
   ~/.skills-auditor/traces/. Sub-skill of skills-auditor.
 ---
 
-# Skills Auditor — Trace QA (cycle 4)
+# Check routing trace consistency
 
-## Before every invocation
+Run `skills-audit skill-trace check`; disabled capture is normal. Report an enabled capture gap once and continue. Do not change capture or hook trust incidentally.
 
-Run `skills-audit skill-trace check` before this cycle, including direct invocation.
-If capture is disabled, continue quietly. If enabled but unverified, stale, or errored,
-report the capture gap once and continue the cycle; do not auto-enable or trust hooks.
-See the [parent preflight contract](../../SKILL.md#before-every-invocation-optional-skill-trace-preflight).
+Run `skills-audit audit-state-machine --trace-dir DIR` on the actual trace directory from the route step; omitting the flag uses `~/.skills-auditor/traces/`.
 
-## When to use
+Inspect transition/state findings before relying on the route result. This command is not a complete trace-schema validator: a valid JSON object without routing records can exit successfully. Confirm the input actually contains the intended route's records and identity; an exit code or analyzed-file count alone is insufficient. Warnings such as unused states in a small sample are not automatically failures. A missing/empty trace set cannot prove a route was executed successfully.
 
-- After one or more `route` runs (dry-run or `--apply`) produced trace JSON.
-- Scoped: `SKILLS_AUDITOR_MODE=traces`.
-
-## Commands
-
-```bash
-skills-audit audit-state-machine
-
-skills-audit audit-state-machine --trace-dir ./my-traces
-```
-
-## Interpretation
-
-- **errors**: fix routing or file state before relying on traces.
-- **warnings / info**: e.g. unused state-machine states on small trace sets — often benign.
-
-## Ledger behavior
-
-- Mode: read-only. This cycle audits existing route trace JSON and does not mutate skill files.
-- Suggested rows: `skill-run` for the trace QA cycle and `trace` rows for each route trace directory or file audited.
-- Use `completed` when there are no trace errors. Use `failed` for trace schema or transition errors. Use `blocked` when required trace files are missing and another cycle must regenerate them.
-- Cleanup is limited to operator-approved trace retention; do not delete traces just because the ledger check passed.
-
-## Parent
-
-[`../../SKILL.md`](../../SKILL.md).
+This command is read-only and audits route state-machine evidence. It does not measure model quality, semantic Skill use, native client loading or Skill Trace hook health. Report concrete errors and missing evidence; preserve logs unless retention cleanup is separately authorized. [Parent](../../SKILL.md).
