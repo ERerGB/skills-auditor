@@ -153,7 +153,7 @@ raise RuntimeError('requested durable boundary was not reached')
         oracle.watch_tree(source, tree_state(source))
         oracle.watch_tree(replacement, tree_state(replacement))
 
-    def test_s01_all_fourteen_operations_follow_literal_state_and_history_model(self):
+    def test_s01_all_operations_follow_literal_state_and_history_model(self):
         with fixture(self) as (root, source, manager, oracle):
             seen = set()
             def perform(operation, **kwargs):
@@ -172,6 +172,11 @@ raise RuntimeError('requested durable boundary was not reached')
             self.assertFalse(os.path.lexists(root / "host-a" / "skill"))
             for operation in ("disable", "enable", "archive", "enable"):
                 perform(operation, installation_id=identifier, payload="H3" if operation == "enable" else None)
+            perform("disable", installation_id=identifier)
+            draft = root / "draft"
+            shutil.copytree(source, draft)
+            (draft / "payload").write_text("project draft")
+            perform("enable-from-source", installation_id=identifier, source=draft, payload="project draft")
             perform("rollback", installation_id=identifier, version_id=first_plan["version"]["version_id"], payload="H1")
             perform("revoke", installation_id=identifier, payload="H1")
             perform("renew", installation_id=identifier, payload="H1")

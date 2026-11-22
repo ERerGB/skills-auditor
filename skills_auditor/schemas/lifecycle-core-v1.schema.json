@@ -22,7 +22,7 @@
     "label": {"type": "string", "minLength": 1, "maxLength": 512},
     "name": {"type": "string", "minLength": 1, "maxLength": 200},
     "reasons": {"type": "array", "items": {"$ref": "#/$defs/label"}, "uniqueItems": true},
-    "operation": {"enum": ["install", "install-retained", "update", "edit", "move", "rename", "disable", "enable", "archive", "uninstall", "renew", "revoke", "rollback", "migrate"]},
+    "operation": {"enum": ["install", "install-retained", "update", "edit", "move", "rename", "disable", "enable", "enable-from-source", "archive", "uninstall", "renew", "revoke", "rollback", "migrate"]},
     "lifecycle_state": {"enum": ["active", "disabled", "archived", "uninstalled"]},
     "authorization": {
       "type": "object", "additionalProperties": false,
@@ -96,7 +96,7 @@
           "type": "object", "additionalProperties": false,
           "required": ["operation", "legacy_receipt_id"],
           "properties": {
-            "operation": {"enum": ["install", "update", "edit", "migrate"]},
+            "operation": {"enum": ["install", "update", "edit", "migrate", "enable-from-source"]},
             "legacy_receipt_id": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]}
           }
         }
@@ -188,7 +188,7 @@
       "allOf": [
         {"$ref": "#/$defs/operation_steps"},
         {
-          "if": {"properties": {"operation": {"enum": ["install", "update", "edit", "migrate"]}}},
+          "if": {"properties": {"operation": {"enum": ["install", "update", "edit", "migrate", "enable-from-source"]}}},
           "then": {"properties": {"source": {"$ref": "#/$defs/path"}}},
           "else": {"properties": {"source": {"type": "null"}}}
         },

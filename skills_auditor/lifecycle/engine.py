@@ -23,12 +23,13 @@ from .snapshots import inspect_source, materialize, verify_snapshot
 
 
 OPERATIONS = frozenset({
-    "install", "update", "edit", "move", "rename", "disable", "enable",
+    "install", "update", "edit", "move", "rename", "disable", "enable", "enable-from-source",
     "archive", "uninstall", "renew", "revoke", "rollback", "migrate", "install-retained",
 })
 _CREATING = frozenset({"install", "migrate", "install-retained"})
-_NEW_VERSION = frozenset({"install", "update", "edit", "migrate"})
-_GRANTING = frozenset({"install", "update", "edit", "migrate", "enable", "renew", "rollback", "move", "rename", "install-retained"})
+_NEW_VERSION = frozenset({"install", "update", "edit", "migrate", "enable-from-source"})
+_ACTIVATING = _CREATING | {"enable", "enable-from-source"}
+_GRANTING = frozenset({"install", "update", "edit", "migrate", "enable", "enable-from-source", "renew", "rollback", "move", "rename", "install-retained"})
 _SCHEMA = "skills-auditor-lifecycle-"
 
 
@@ -229,6 +230,8 @@ class Manager:
                 raise LifecycleError("invalid_transition", "Uninstalled identity is historical; create a new installation.")
             if operation in {"update", "edit", "move", "disable", "renew", "rollback"} and before["state"] != "active":
                 raise LifecycleError("invalid_transition", "Operation requires an active installation.")
+            if operation == "enable-from-source" and before["state"] != "disabled":
+                raise LifecycleError("invalid_transition", "Replacing the source during enable requires a disabled installation.")
             if operation == "enable" and before["state"] not in {"disabled", "archived"}:
                 raise LifecycleError("invalid_transition", "Enable requires a disabled or archived installation.")
             if operation == "move" and target is None:
@@ -313,7 +316,7 @@ class Manager:
         }
         after.update({"target": str(target_path), "version_id": version["version_id"],
                       "name": name or (before["name"] if before else skill["name"])})
-        after["state"] = {"disable": "disabled", "archive": "archived", "uninstall": "uninstalled"}.get(operation, "active" if operation in _CREATING | {"enable"} else before["state"])
+        after["state"] = {"disable": "disabled", "archive": "archived", "uninstall": "uninstalled"}.get(operation, "active" if operation in _ACTIVATING else before["state"])
         desired = {"kind": "symlink", "link": version_entry(version)} if after["state"] == "active" else {"kind": "missing"}
         if operation == "revoke":
             desired = {key: value for key, value in observation.items() if key != "identity"}
@@ -450,6 +453,8 @@ class Manager:
                     raise ValueError("terminal prior state")
                 if operation in {"update", "edit", "move", "disable", "renew", "rollback"} and before["state"] != "active":
                     raise ValueError("active prior state required")
+                if operation == "enable-from-source" and before["state"] != "disabled":
+                    raise ValueError("disabled prior state required for source replacement")
                 if operation == "enable" and before["state"] not in {"disabled", "archived"}:
                     raise ValueError("disabled prior state required")
                 if operation != "move" and after["target"] != before["target"]:
@@ -461,7 +466,7 @@ class Manager:
                 expected_after = {"schema_version": _SCHEMA + "installation/v1", "installation_id": plan["installation_id"],
                                   "skill_id": plan["skill"]["skill_id"], "created_at": after["created_at"],
                                   "authorization": {"state": "unknown", "grant_id": None}}
-            expected_state = {"disable": "disabled", "archive": "archived", "uninstall": "uninstalled"}.get(operation, "active" if operation in _CREATING | {"enable"} else before["state"])
+            expected_state = {"disable": "disabled", "archive": "archived", "uninstall": "uninstalled"}.get(operation, "active" if operation in _ACTIVATING else before["state"])
             expected_after.update(target=after["target"], version_id=after["version_id"], name=after["name"], state=expected_state)
             if after != expected_after or not isinstance(after["name"], str) or not after["name"].strip() or len(after["name"]) > 200:
                 raise ValueError("impossible installation postcondition")
