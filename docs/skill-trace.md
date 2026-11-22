@@ -122,7 +122,7 @@ Return to the [README overview](../README.md#optional-skill-trace) for the opera
 
 ## Explicit project resource scopes
 
-Skill Trace 0.4.0 with Skills Auditor 0.12.0 adds `skills-audit skill-trace scope` for
+Skill Trace 0.4.1 with Skills Auditor 0.12.1 adds `skills-audit skill-trace scope` for
 explicit project/environment-bound context and private resources. See the
 [resource scope contract](resource-scopes.md) for enrollment, no-fallback behavior,
 private-state ownership and the resolver's enforcement limits. This operation is

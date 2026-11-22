@@ -1,6 +1,6 @@
 {
   "name": "skill-trace",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Local Skill access evidence and explicit project resource scopes.",
   "author": {
     "name": "Skills Auditor"

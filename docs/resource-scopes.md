@@ -1,6 +1,6 @@
 # Project resource scopes
 
-On POSIX hosts with no-follow directory descriptors, Skill Trace 0.4.0 exposes an explicit resource resolver through Skills Auditor 0.12.0.
+On POSIX hosts with no-follow directory descriptors, Skill Trace 0.4.1 exposes an explicit resource resolver through Skills Auditor 0.12.1.
 Global Skill instructions stay generic. A project owns its portable context declaration;
 each environment/workspace/Skill binding owns private state. Capture is optional and does not
 authorize or disable resource access. This is an additive opt-in mechanism: existing tools and
@@ -62,7 +62,10 @@ A bounded task may proceed using only its explicitly supplied brief without pers
 
 `resolve` returns verified scope paths and context content hashes; `read-context` also returns text.
 `read-private --name draft.txt` emits the private file bytes. `write-private --name draft.txt` reads
-bytes from stdin. All commands require the same explicit binding flags. Private subdirectories must
+bytes from stdin. All commands require the same explicit binding flags. Pass the actual task `--target`
+to resolve/read-context and both private operations; foreign or nested-project targets
+are rejected before file access. Omitted target means the explicit project root.
+Initialization rejects `--target`; action-inapplicable options are errors. Private subdirectories must
 already exist inside the private root; the resolver never creates directories from arbitrary names.
 Individual reads/writes are limited to 1 MiB; at most 32 context resources are allowed per Skill.
 Private writes replace the selected file in place and are not a transactional document database.
