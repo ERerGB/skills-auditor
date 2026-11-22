@@ -85,7 +85,7 @@ def fingerprint():
 
 
 def declaration(value):
-    fields(value, {"schema_version", "baseline"}, {"overrides", "platforms", "sources"})
+    fields(value, {"schema_version", "baseline"}, {"overrides", "platforms", "sources", "skill_ids"})
     if value["schema_version"] != PREFIX + "declaration/v1":
         fail("workspace_input", "Unsupported workspace declaration schema.")
     if (not isinstance(value["baseline"], list) or not value["baseline"]
@@ -101,6 +101,15 @@ def declaration(value):
         identifier(name)
         source_spec(spec)
     platforms(value.get("platforms", list(DEFAULT_PLATFORMS)))
+    from .directory import skill_uuid
+    ids = value.get("skill_ids", {})
+    if not isinstance(ids, dict):
+        fail("workspace_input", "Skill IDs must map project aliases to UUIDs.")
+    for alias, key in ids.items():
+        identifier(alias)
+        skill_uuid(key)
+    if len(set(ids.values())) != len(ids):
+        fail("workspace_input", "Project aliases must use distinct Skill UUIDs.")
     overrides = value.get("overrides", {})
     if not isinstance(overrides, dict):
         fail("workspace_input", "Project overrides must be an object.")

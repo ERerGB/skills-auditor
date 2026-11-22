@@ -8,6 +8,7 @@ import copy
 import json
 import os
 import shutil
+import uuid
 from pathlib import Path
 
 from ..cli import _IGNORE_SKILL_SCAN_SEGMENTS, parse_skill_name, skill_alias_for_install_root
@@ -266,6 +267,10 @@ class Node:
             if source not in candidates:
                 candidates[source] = stage(packets[source], self.root / "candidates")
             selected[name] = choice
+        subscription = request.get("catalog_selection")
+        if subscription is not None:
+            selected = {name: choice for name, choice in selected.items()
+                        if name in subscription["entries"] or choice["source"] in subscription["local_sources"]}
         desired = []
         target_keys = set()
         for platform in selected_platforms:
@@ -280,6 +285,27 @@ class Node:
                 target_keys.add(key)
                 desired.append({"name": name, "platform": platform, **choice, "target": target})
         findings = self._conflicts(workspace, desired)
+        if subscription is not None:
+            # An exposed parent folder can itself publish nested skills. Check the
+            # actual staged paths, including directory aliases and undeclared entries.
+            allowed = {(candidates[c["source"]] / c["entry"]).resolve() for c in selected.values()}
+            for name, choice in selected.items():
+                if choice["source"] in subscription["local_sources"]:
+                    continue
+                root = candidates[choice["source"]] / choice["entry"]
+                seen = set()
+                pending = [root]
+                while pending:
+                    folder = pending.pop().resolve()
+                    if folder in seen:
+                        continue
+                    seen.add(folder)
+                    if (folder / "SKILL.md").is_file() and folder not in allowed:
+                        findings.append({"code": "catalog_nested_unselected", "name": name,
+                                         "nested": parse_skill_name(folder / "SKILL.md")})
+                        break
+                    pending.extend(p for p in folder.iterdir() if p.is_dir() and not p.name.startswith(".")
+                                   and p.name not in IGNORED | _IGNORE_SKILL_SCAN_SEGMENTS)
         manager = Manager(self.root / "managed")
         children, actions, expectations = [], [], []
         try:
@@ -290,11 +316,35 @@ class Node:
                 record = indexed.get((platform, name))
                 source = candidates[item["source"]]
                 packet = packets[item["source"]]
-                skill_id = digest({"workspace_skill": name})
+                declared_id = declared.get("skill_ids", {}).get(name)
+                catalog_id = None
+                if subscription is not None and item["source"] not in subscription["local_sources"]:
+                    catalog_id = subscription["entries"][name]
+                    if declared_id and declared_id != catalog_id:
+                        findings.append({"code": "catalog_identity_conflict", "name": name})
+                        continue
+                    if record and (record.get("catalog_skill_id") not in (None, catalog_id)
+                                   or record.get("catalog_workspace") not in (None, subscription["workspace"])):
+                        findings.append({"code": "catalog_identity_conflict", "name": name})
+                        continue
+                # Older installations keep their lifecycle ID. The portable UUID
+                # is carried independently in the reviewed plan and mapping.
+                slot = digest([workspace_id, name])
+                local_id = manager.repository.get("workspace_skill_uuid", slot)
+                portable_id = catalog_id or declared_id or (local_id and local_id["data"]["skill_id"])
+                if not portable_id:
+                    portable_id = str(uuid.uuid4())
+                if local_id is None:
+                    manager.repository.put("workspace_skill_uuid", slot, {"skill_id": portable_id})
+                elif (catalog_id or declared_id) and local_id["data"]["skill_id"] != portable_id:
+                    findings.append({"code": "workspace_skill_uuid_conflict", "name": name})
+                    continue
+                item["skill_id"] = portable_id
+                before = manager.get_installation(record["installation_id"]) if record else None
+                skill_id = before["skill_id"] if before else portable_id
                 identity = manager.repository.get("skill", skill_id)
                 if not identity:
                     manager.repository.put("skill", skill_id, {"skill_id": skill_id, "name": name, "created_at": utc_now()})
-                before = manager.get_installation(record["installation_id"]) if record else None
                 if before:
                     version = manager.repository.get("version", before["version_id"])["data"]
                     same = (version["snapshot"]["source_tree_sha256"] == packet["inspection"]["source_tree_sha256"]
@@ -325,16 +375,20 @@ class Node:
                                              skill_id=skill_id, name=name, legacy_receipt=receipt)
                     else:
                         child = manager.plan("install", source=source, entrypoint=item["entry"], target=target, skill_id=skill_id, name=name)
-                children.append({"plan": child, "workspace": workspace_id, "name": name, "platform": platform})
+                children.append({"plan": child, "workspace": workspace_id, "name": name, "platform": platform,
+                                 **({"catalog_workspace": subscription["workspace"], "catalog_skill_id": catalog_id}
+                                    if catalog_id else {})})
                 actions.append({**item, "action": child["operation"], "installation_id": child["installation_id"]})
             wanted = {(v["platform"], v["name"]) for v in desired}
             for record in records:
+                if subscription is not None and record.get("catalog_workspace") != subscription["workspace"]:
+                    continue
                 if (record["platform"], record["name"]) in wanted:
                     continue
                 before = manager.get_installation(record["installation_id"])
                 if before["state"] == "active":
                     child = manager.plan("disable", installation_id=record["installation_id"])
-                    children.append({"plan": child, **{k: record[k] for k in ("workspace", "name", "platform")}})
+                    children.append({"plan": child, **{k: record[k] for k in ("workspace", "name", "platform", "catalog_workspace", "catalog_skill_id") if k in record}})
                     actions.append({"name": record["name"], "platform": record["platform"], "action": "disable",
                                     "target": before["target"], "installation_id": before["installation_id"]})
             result = seal({"schema_version": PREFIX + "node-plan/v1", "binding": binding,
@@ -500,6 +554,8 @@ class Node:
                     receipt = manager.apply(child["plan"], approve_plan_id=child["plan"]["plan_id"], transaction_id=transaction_id)
                 installation = manager.get_installation(child["plan"]["installation_id"])
                 mapping = {k: child[k] for k in ("workspace", "name", "platform")}
+                if child.get("catalog_skill_id"):
+                    mapping.update(catalog_skill_id=child["catalog_skill_id"], catalog_workspace=child["catalog_workspace"])
                 mapping["installation_id"] = installation["installation_id"]
                 mapping_key = self._record_key(mapping["workspace"], mapping["platform"], mapping["name"])
                 previous_mapping = manager.repository.get("workspace_installation", mapping_key)
@@ -620,7 +676,7 @@ class Node:
                 else:
                     inverse = manager.plan("enable", installation_id=current["installation_id"])
                 mapping = by_id[current["installation_id"]]
-                children.append({"plan": inverse, **{k: mapping[k] for k in ("workspace", "name", "platform")}})
+                children.append({"plan": inverse, **{k: mapping[k] for k in ("workspace", "name", "platform", "catalog_workspace", "catalog_skill_id") if k in mapping}})
                 actions.append({"name": mapping["name"], "platform": mapping["platform"], "target": current["target"], "action": inverse["operation"]})
             result = seal({"schema_version": PREFIX + "node-plan/v1", "binding": read_json(self.binding_path),
                 "workspace": old["workspace"], "workspace_binding": workspace, "declaration": old["declaration"],
@@ -653,7 +709,7 @@ class Node:
 
     def dispatch(self, request):
         fields(request, {"method", "environment", "generation"},
-               {"state_dir", "workspace", "path", "platforms", "declaration", "packets", "plan", "approve_plan_id", "mode", "legacy_receipts", "native_platforms", "source"})
+               {"state_dir", "workspace", "path", "platforms", "declaration", "packets", "plan", "approve_plan_id", "mode", "legacy_receipts", "native_platforms", "source", "catalog_selection"})
         identifier(request["environment"])
         identifier(request["generation"])
         methods = {"register": self.register, "inspect": self.inspect, "plan": self.plan, "apply": self.apply,

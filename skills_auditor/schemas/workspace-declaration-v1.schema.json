@@ -10,6 +10,7 @@
     "platforms": {"$ref": "#/$defs/platforms"},
     "sources": {"type": "object", "propertyNames": {"$ref": "#/$defs/id"}, "additionalProperties": {"$ref": "#/$defs/source"}},
     "baseline": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+    "skill_ids": {"type": "object", "propertyNames": {"$ref": "#/$defs/id"}, "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"}},
     "overrides": {
       "type": "object", "propertyNames": {"$ref": "#/$defs/id"},
       "additionalProperties": {"oneOf": [{"type": "null"}, {

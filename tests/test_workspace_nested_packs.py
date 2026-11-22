@@ -251,3 +251,23 @@ class NestedManagedPackRegression(WorkspaceFixture):
 
 
 if __name__=='__main__':unittest.main()
+
+
+class CatalogNestedSelection(WorkspaceFixture):
+    def test_unselected_nested_entry_cannot_leak_through_parent(self):
+        from uuid import uuid4
+        from skills_auditor.workspace.common import PREFIX, seal
+        from skills_auditor.workspace.sources import capture
+        nested = self.source / "skills/alpha/child"
+        nested.mkdir()
+        (nested / "SKILL.md").write_text("---\nname: child\ndescription: synthetic\n---\n")
+        packet = capture({**self.binding, "entries": {"alpha": "skills/alpha", "child": "skills/alpha/child"}})
+        release = seal({"schema_version": PREFIX + "release/v1", "sources": {"shared": packet}}, "release_id")
+        ids = {"alpha": str(uuid4()), "child": str(uuid4())}
+        options = {"catalog_release": release, "catalog_consent": {"workspace": "company"}}
+        blocked = self.service.plan(["one"], catalog_selected={"alpha": ids["alpha"]}, **options)
+        self.assertEqual(blocked["targets"][0]["plan"]["findings"][0]["code"], "catalog_nested_unselected")
+        for selected in ({}, {"child": ids["child"]}, ids):
+            plan = self.service.plan(["one"], catalog_selected=selected, **options)
+            self.assertEqual(plan["status"], "planned")
+            self.assertEqual(plan["summary"]["changes"], 3 * len(selected))
