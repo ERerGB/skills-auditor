@@ -1,0 +1,9 @@
+{
+  "name": "skills-auditor-registry",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-11-22",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": false },
+  "d1_databases": [{ "binding": "DB", "database_name": "skills-auditor-registry", "database_id": "<private-registry-database-uuid>" }]
+}

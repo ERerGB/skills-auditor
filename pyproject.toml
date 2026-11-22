@@ -56,6 +56,7 @@ include = [
   "/e2e_tests",
   "/experiments/vendir-potology",
   "/scripts",
+  "/services/workspace-registry",
   "/smoke_tests",
   "/tests",
   "/skills_auditor/schemas",

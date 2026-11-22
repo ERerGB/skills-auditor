@@ -28,6 +28,8 @@ catalog are deferred. The existing workspace bindings, fixed-version delivery
 and reviewed installation workflow remain in scope; they do not require moving
 Skill authorship into a central service.
 
+See the [authenticated workspace catalog](workspace-catalog.md) for enrollment, version discovery and pinned release planning.
+
 ## Identity and storage
 
 | Identity | Binding |
