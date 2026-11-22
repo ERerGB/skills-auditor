@@ -30,6 +30,7 @@ PACKAGE_FILES = {
     "skills_auditor/workspace/__init__.py",
     "skills_auditor/workspace/common.py",
     "skills_auditor/workspace/catalog.py",
+    "skills_auditor/workspace/directory.py",
     "skills_auditor/workspace/registry.py",
     "skills_auditor/workspace/sources.py",
     "skills_auditor/workspace/providers.py",

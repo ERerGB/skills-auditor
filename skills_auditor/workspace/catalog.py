@@ -14,6 +14,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .._version import __version__
 from ..lifecycle.common import canonical_json
+from . import directory
 from .common import MAX_BYTES, atomic_json, checked, decode_json, fail, fields, identifier, read_json
 from .sources import unpack
 
@@ -64,9 +65,10 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def fetch(profile, route, limit=8192):
-    request = Request(profile["origin"] + "/v1/" + route,
-                      headers={"Authorization": "Bearer " + profile["token"], "User-Agent": "skills-auditor/" + __version__})
+def fetch(profile, route, limit=8192, *, method="GET", body=None):
+    request = Request(profile["origin"] + "/v1/" + route, method=method,
+                      data=canonical_json(body).encode() if body is not None else None,
+                      headers={"Content-Type": "application/json", "Authorization": "Bearer " + profile["token"], "User-Agent": "skills-auditor/" + __version__})
     try:
         with build_opener(NoRedirect()).open(request, timeout=30) as response:
             data = response.read(limit + 1)
@@ -185,6 +187,8 @@ def add_commands(sub):
     root = sub.add_parser("catalog", help="Discover and verify an authenticated workspace release.")
     root.add_argument("--profile", type=Path, default=PROFILE)
     cmds = root.add_subparsers(dest="catalog_command", required=True)
+    cmds.add_parser("new-id", help="Generate a portable Skill UUID locally.")
+    directory.configure(cmds)
     new = cmds.add_parser("enroll", help="Generate this client's credential and show its binding digest.")
     new.add_argument("--origin", required=True)
     new.add_argument("--workspace", required=True)
@@ -202,6 +206,9 @@ def add_commands(sub):
 
 def run(args, service):
     op = args.catalog_command
+    if op == "new-id":
+        import uuid
+        return {"skill_id": str(uuid.uuid4())}
     if op == "enroll":
         return enroll(args.profile, args.origin, args.workspace)
     if op == "lint":
@@ -209,9 +216,17 @@ def run(args, service):
     profile = profile_at(args.profile)
     if op == "discover":
         return discover(profile)
+    if op not in ("plan", "resolve"):
+        return directory.run(args, profile, service)
     bundle, receipt = resolve(profile, args.pin)
     if op == "plan":
-        return service.plan(args.workspaces, catalog_release=bundle["release"], catalog_digest=receipt["digest"])
+        account = directory.listing(profile, receipt["digest"])
+        for name in args.workspaces:
+            directory.local_project(service, name)
+        available = {name for name, item in bundle["items"].items() if item["disposition"] == "available"}
+        selected = {r["entry_name"]: r["skill_id"] for r in account["skills"] if r["subscribed"] and r["entry_name"] in available}
+        return service.plan(args.workspaces, catalog_release=bundle["release"], catalog_digest=receipt["digest"],
+                            catalog_selected=selected, catalog_consent=directory.consent(profile, args.profile, account))
     if args.out:
         atomic_json(args.out, bundle)
     return {**receipt, "items": bundle["items"]}

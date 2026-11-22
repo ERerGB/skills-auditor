@@ -142,12 +142,14 @@ class TestCatalogPlan(WorkspaceFixture):
         self.write_package(project, "exception")
         self.registry.put("sources", "override", {**self.binding, "root": str(project)})
         self.write_declaration(self.two, overrides={"alpha": {"source": "override", "entry": "skills/alpha"}})
-        plan = self.service.plan(["two"], catalog_release=release, catalog_digest="a" * 64)
+        consent = {"workspace": "test"}
+        options = {"catalog_release": release, "catalog_selected": {}, "catalog_consent": consent}
+        plan = self.service.plan(["two"], catalog_digest="a" * 64, **options)
         self.assertEqual(plan["status"], "planned")
         self.assertEqual(plan["live_overrides"], ["override"])
         (project / "helper").write_text("changed")
-        with self.assertRaisesRegex(LifecycleError, "changed after review"):
+        with patch("skills_auditor.workspace.directory.recheck"), self.assertRaisesRegex(LifecycleError, "changed after review"):
             self.apply(plan)
         self.write_declaration(self.two, baseline=["unpublished"])
         with self.assertRaisesRegex(LifecycleError, "absent"):
-            self.service.plan(["two"], catalog_release=release)
+            self.service.plan(["two"], **options)

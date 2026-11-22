@@ -46,7 +46,8 @@ class WorkspaceService:
                 result["environments"][name] = {"status": "unknown", "code": error.code, "message": error.message}
         return result
 
-    def plan(self, workspaces=(), *, legacy_receipts=None, release=None, catalog_release=None, catalog_digest=None):
+    def plan(self, workspaces=(), *, legacy_receipts=None, release=None, catalog_release=None, catalog_digest=None,
+             catalog_selected=None, catalog_consent=None):
         state = self.registry.read()
         selected = list(workspaces) or sorted(state["workspaces"])
         if not selected or len(selected) != len(set(selected)):
@@ -63,17 +64,22 @@ class WorkspaceService:
                 source_specs[source] = spec
             source_ids.update(value["baseline"])
             source_ids.update(v["source"] for v in value.get("overrides", {}).values() if v is not None)
+        if catalog_release is not None and (catalog_selected is None or not catalog_consent):
+            fail("catalog_selection", "Subscription-aware planning requires an enrolled reader and pinned release.")
         live_overrides = set()
         if catalog_release is not None:
             checked(catalog_release, "release_id", "release")
             baseline = {key for value in declarations.values() for key in value["baseline"]}
             published = catalog_release["sources"]
-            if baseline - published.keys():
+            local_baseline = {key for key in baseline - published.keys()
+                              if key in state["sources"] and
+                              source_specs.get(key, state["sources"][key]).get("kind") == "local"}
+            if baseline - published.keys() - local_baseline:
                 fail("catalog_baseline", "Declared baseline is absent from the pinned catalog.")
-            packets = {key: published[key] for key in baseline}
+            packets = {}
             for key in sorted(source_ids):
                 spec = source_specs.get(key)
-                if key not in baseline and key in state["sources"]:
+                if (key not in baseline or key in local_baseline) and key in state["sources"]:
                     live_overrides.add(key)
                     packets[key] = self._capture({**state["sources"][key], **(spec or {})}, state)
                 elif key in published:
@@ -110,6 +116,8 @@ class WorkspaceService:
             try:
                 value = provider(environment, state["environments"][environment]).call("plan", workspace=name,
                     declaration=declarations[name], packets=packets,
+                    **({"catalog_selection": {"entries": catalog_selected, "local_sources": sorted(live_overrides),
+                                               "workspace": catalog_consent["workspace"]}} if catalog_selected is not None else {}),
                     legacy_receipts=(legacy_receipts or {}).get(environment, []))
                 targets.append({"workspace": name, "environment": environment, "status": value["status"], "plan": value})
             except LifecycleError as error:
@@ -117,6 +125,7 @@ class WorkspaceService:
                                 "error": {"code": error.code, "message": error.message, "details": error.details}})
         return self._save_plan({"schema_version": PREFIX + "plan/v1", "registry_digest": digest(state),
             "created_at": utc_now(), "operation": "restore" if release else "deploy",
+            **({"catalog_consent": catalog_consent} if catalog_consent else {}),
             **({"catalog_digest": catalog_digest, "live_overrides": sorted(live_overrides)} if catalog_release else {}), "declarations": declarations,
             "release_id": retained["release_id"],
             "source_specs": {name: source_specs[name] for name in sorted(source_ids) if name in source_specs},
@@ -150,6 +159,11 @@ class WorkspaceService:
         for name, declared in value["declarations"].items():
             if declaration(read_json(state["workspaces"][name]["declaration"])) != declared:
                 fail("workspace_stale", "Workspace declaration changed after review.", workspace=name)
+        if value.get("catalog_consent"):
+            from .directory import recheck
+            recheck(value["catalog_consent"])
+        elif value.get("catalog_digest"):
+            fail("catalog_selection", "Regenerate this legacy catalog plan with environment subscriptions.")
         return state
 
     def apply(self, plan, *, approve_plan_id):
@@ -215,13 +229,24 @@ class WorkspaceService:
         journal = self.registry.root / "transactions" / (plan["plan_id"] + ".json")
         if not journal.is_file() or read_json(journal)["status"] != "completed":
             fail("workspace_recovery_required", "Rollback requires a completed deployment; inspect partial operations first.")
+        consent = plan.get("catalog_consent")
+        if consent:
+            from .directory import recheck
+            recheck(consent)
+            # An inverse can expose a previous package (including nested native
+            # entries). Re-plan that retained version against current consent.
+            if any(child["plan"]["before"] and child["plan"]["before"]["state"] == "active"
+                   for t in plan["targets"] for child in t["plan"]["children"]):
+                fail("catalog_rollback", "Plan the retained version to revalidate its native entries against current subscriptions.")
+        elif plan.get("catalog_digest"):
+            fail("catalog_selection", "Use subscription-aware planning for this legacy catalog.")
         targets = []
         for target in reversed(plan["targets"]):
             environment = target["environment"]
             value = provider(environment, state["environments"][environment]).call("rollback", plan=target["plan"])
             targets.append({"workspace": target["workspace"], "environment": environment, "status": value["status"], "plan": value})
         return self._save_plan({"schema_version": PREFIX + "plan/v1", "registry_digest": digest(state), "created_at": utc_now(),
-            "operation": "rollback", "declarations": {n: declaration(read_json(state["workspaces"][n]["declaration"])) for n in plan["declarations"]},
+            "operation": "rollback", **({"catalog_consent": consent} if consent else {}), "declarations": {n: declaration(read_json(state["workspaces"][n]["declaration"])) for n in plan["declarations"]},
             "sources": {}, "targets": targets})
 
     def export_release(self, plan, destination):
