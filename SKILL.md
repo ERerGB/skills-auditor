@@ -22,6 +22,7 @@ Load `SKILLS_AUDITOR_CONFIG` if explicitly configured, then run `skills-audit sk
 | Adopt canonical sources into this host | `integrate` → reviewed `apply PLAN` → `verify RECEIPT`; [integration contract](docs/integration-contract.md) |
 | Inspect metadata, duplication or variants | Only the requested [maintenance cycle](#maintain-existing-install-roots) |
 | Manage an existing approved installation | [Managed lifecycle](docs/managed-lifecycle.md); preserve its owner and stable installation ID |
+| Isolate project context and private Skill resources | `skill-trace scope` → [resource scope contract](docs/resource-scopes.md); explicit binding, no cross-project fallback |
 | Shared baseline with project exceptions across hosts | [Workspace management](docs/workspace-management.md); prepare/apply the exact target-local plan |
 | Deliver across filesystems or restore a target | [Locked delivery](#deliver-across-filesystems-and-restore-environments) |
 | Rewrite a Skill manual and learn from execution | [Bounded handbook calibration](docs/handbook-calibration.md) |

@@ -2542,7 +2542,7 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
     p_record_trigger.add_argument("--notes", default="", help="Short operator note.")
 
     sub.add_parser("handbook-pilot", help="Experimental bounded real-use handbook calibration pilot")
-    p_skill_trace = sub.add_parser("skill-trace", help="Control and check only the optional Skill Trace plugin")
+    p_skill_trace = sub.add_parser("skill-trace", help="Control Skill Trace; use skill-trace scope --help for isolated project resources")
     p_skill_trace.add_argument("action", choices=("enable", "disable", "status", "check"))
     p_skill_trace.add_argument("--log-dir", help="Sensor log root; defaults to SKILLS_AUDITOR_LOG_DIR or .skills-auditor-local")
     p_skill_trace.add_argument("--session-id", help="Task to check; defaults to the current Codex task")
@@ -2833,6 +2833,9 @@ def build_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
 
 
 def _main(prog: Optional[str] = None) -> int:
+    if sys.argv[1:3] == ["skill-trace", "scope"]:
+        from skills_auditor.resource_scope import main as scope_main
+        return scope_main(sys.argv[3:])
     if len(sys.argv) > 1 and sys.argv[1] == "workspace":
         from skills_auditor.workspace.cli import main as workspace_main
         return workspace_main(sys.argv[2:], prog=(prog or "skills-audit") + " workspace")

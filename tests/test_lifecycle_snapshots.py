@@ -486,10 +486,12 @@ class TestSnapshotValidation(SnapshotFixture):
 
                 def open_entry(path, flags, *args, **kwargs):
                     if not mutated and path == "SKILL.md" and scenario == "file_open":
-                        (self.source / "SKILL.md").write_text("different size")
+                        (self.source / "SKILL.md").write_text("different size payload for mutation")
                         mutated.append(True)
                     if not mutated and path == "scripts" and scenario == "directory_open":
                         (self.source / "scripts" / "new").write_text("new entry")
+                        # Coarse filesystem timestamps can hide a same-tick directory mutation.
+                        os.utime(self.source / "scripts", ns=(1, 1))
                         mutated.append(True)
                     return actual_open(path, flags, *args, **kwargs)
 
@@ -500,6 +502,7 @@ class TestSnapshotValidation(SnapshotFixture):
                         mutated.append(True)
                     if not mutated and scenario == "directory_scan":
                         (self.source / "added").write_text("added during scan")
+                        os.utime(self.source, ns=(1, 1))
                         mutated.append(True)
                     return result
 
