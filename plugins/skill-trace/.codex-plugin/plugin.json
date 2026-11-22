@@ -1,7 +1,7 @@
 {
   "name": "skill-trace",
-  "version": "0.3.0",
-  "description": "Optional local skill usage sensor for Skills Auditor.",
+  "version": "0.4.0",
+  "description": "Local Skill access evidence and explicit project resource scopes.",
   "author": {
     "name": "Skills Auditor"
   },
@@ -14,8 +14,8 @@
   ],
   "interface": {
     "displayName": "Skill Trace",
-    "shortDescription": "Capture local skill access events.",
-    "longDescription": "Skill Trace optionally captures Codex hook payloads as local Skills Auditor sensor events. Enable capture explicitly and review the plugin hooks in Codex CLI /hooks.",
+    "shortDescription": "Trace Skill use and isolate project resources.",
+    "longDescription": "Skill Trace records optional local access evidence and provides explicit project/environment-bound context and private resource resolution. Scope checks work independently of capture; arbitrary tool access still follows host permissions.",
     "developerName": "Skills Auditor",
     "category": "Productivity",
     "capabilities": [

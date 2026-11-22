@@ -57,7 +57,7 @@ class Node:
                 fail("workspace_replaced", "Registered native Skill root was replaced or redirected.", platform=platform)
         return value
 
-    def register(self, request):
+    def register(self, request, *, initialize_manager=True):
         expected = {"environment": request["environment"], "generation": request["generation"],
                     "runtime_fingerprint": fingerprint()}
         if self.binding_path.exists() and read_json(self.binding_path) != expected:
@@ -89,8 +89,9 @@ class Node:
         atomic_json(self.binding_path, expected)
         workspaces[name] = value
         atomic_json(self.root / "workspaces.json", workspaces)
-        manager = Manager(self.root / "managed")
-        manager.repository.close()
+        if initialize_manager:
+            manager = Manager(self.root / "managed")
+            manager.repository.close()
         return {"status": "registered", "binding": expected, "workspace": name, **value}
 
     def _record_key(self, workspace, platform, name):

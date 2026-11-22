@@ -119,3 +119,12 @@ are both needed. Disabling capture preserves history and all ordinary Skills Aud
 
 If events are missing, follow [capture troubleshooting](troubleshooting.md#skill-trace-captures-no-events).
 Return to the [README overview](../README.md#optional-skill-trace) for the operator entry point.
+
+## Explicit project resource scopes
+
+Skill Trace 0.4.0 with Skills Auditor 0.12.0 adds `skills-audit skill-trace scope` for
+explicit project/environment-bound context and private resources. See the
+[resource scope contract](resource-scopes.md) for enrollment, no-fallback behavior,
+private-state ownership and the resolver's enforcement limits. This operation is
+independent of hook capture; installing the plugin alone does not isolate arbitrary
+Skill or tool reads. Scope decision evidence is a separate optional stream.
