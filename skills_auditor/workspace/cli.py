@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from ..lifecycle.common import LifecycleError
+from . import catalog
 from .common import DEFAULT_PLATFORMS, PLATFORMS, atomic_json, fail, read_json
 from .service import WorkspaceService
 
@@ -18,6 +19,7 @@ def parser(prog="skills-audit workspace"):
     root.add_argument("--registry-root", type=Path, help="Private owner-local bindings and controller evidence.")
     root.add_argument("--format", choices=("json", "text"), default="json")
     sub = root.add_subparsers(dest="command", required=True)
+    catalog.add_commands(sub)
     env = sub.add_parser("environment", help="Bind an execution environment without provisioning connectivity.").add_subparsers(dest="environment_command", required=True)
     add = env.add_parser("add")
     add.add_argument("id")
@@ -73,7 +75,9 @@ def main(argv=None, prog="skills-audit workspace"):
     try:
         args = parser(prog).parse_args(argv)
         service = WorkspaceService(args.registry_root)
-        if args.command == "environment":
+        if args.command == "catalog":
+            value = catalog.run(args, service)
+        elif args.command == "environment":
             config = {"provider": args.provider, "generation": args.generation, "state_dir": args.state_dir}
             for key in ("connection", "python", "python_path", "potology_state", "potology_tools", "potology_target", "pairing"):
                 if getattr(args, key):

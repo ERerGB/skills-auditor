@@ -46,7 +46,7 @@ class WorkspaceService:
                 result["environments"][name] = {"status": "unknown", "code": error.code, "message": error.message}
         return result
 
-    def plan(self, workspaces=(), *, legacy_receipts=None, release=None):
+    def plan(self, workspaces=(), *, legacy_receipts=None, release=None, catalog_release=None, catalog_digest=None):
         state = self.registry.read()
         selected = list(workspaces) or sorted(state["workspaces"])
         if not selected or len(selected) != len(set(selected)):
@@ -63,6 +63,32 @@ class WorkspaceService:
                 source_specs[source] = spec
             source_ids.update(value["baseline"])
             source_ids.update(v["source"] for v in value.get("overrides", {}).values() if v is not None)
+        live_overrides = set()
+        if catalog_release is not None:
+            checked(catalog_release, "release_id", "release")
+            baseline = {key for value in declarations.values() for key in value["baseline"]}
+            published = catalog_release["sources"]
+            if baseline - published.keys():
+                fail("catalog_baseline", "Declared baseline is absent from the pinned catalog.")
+            packets = {key: published[key] for key in baseline}
+            for key in sorted(source_ids):
+                spec = source_specs.get(key)
+                if key not in baseline and key in state["sources"]:
+                    live_overrides.add(key)
+                    packets[key] = self._capture({**state["sources"][key], **(spec or {})}, state)
+                elif key in published:
+                    packet = packets[key] = published[key]
+                    if spec and (any(spec.get(k) != v for k, v in packet["origin"].items())
+                            or spec["entries"] != packet["entries"] or spec["platforms"] != packet["platforms"]
+                            or spec.get("required_files", []) != packet["required_files"]
+                            or any(not any(i == "." or f["path"] == i or f["path"].startswith(i + "/")
+                                           for i in spec["include"]) for f in packet["files"])
+                            or any(not any(i == "." or f["path"] == i or f["path"].startswith(i + "/")
+                                           for f in packet["files"]) for i in spec["include"])):
+                        fail("catalog_spec", "Project source declaration differs from the catalog pin.", source=key)
+                else:
+                    fail("catalog_override", "Project override requires its own source binding.", source=key)
+            release = seal({"schema_version": PREFIX + "release/v1", "sources": packets}, "release_id")
         if release is not None:
             checked(release, "release_id", "release")
             packets = release["sources"]
@@ -90,7 +116,8 @@ class WorkspaceService:
                 targets.append({"workspace": name, "environment": environment, "status": "blocked",
                                 "error": {"code": error.code, "message": error.message, "details": error.details}})
         return self._save_plan({"schema_version": PREFIX + "plan/v1", "registry_digest": digest(state),
-            "created_at": utc_now(), "operation": "restore" if release else "deploy", "declarations": declarations,
+            "created_at": utc_now(), "operation": "restore" if release else "deploy",
+            **({"catalog_digest": catalog_digest, "live_overrides": sorted(live_overrides)} if catalog_release else {}), "declarations": declarations,
             "release_id": retained["release_id"],
             "source_specs": {name: source_specs[name] for name in sorted(source_ids) if name in source_specs},
             "source_owners": {} if release else {name: {
@@ -129,7 +156,7 @@ class WorkspaceService:
         state = self._plan(plan, approve_plan_id)
         retained = checked(read_json(self.registry.root / "releases" / (plan["release_id"] + ".json")), "release_id", "release") if plan.get("release_id") else None
         for name, expected in plan["sources"].items():
-            current = retained["sources"][name] if plan["operation"] == "restore" else self._capture({**state["sources"][name], **plan.get("source_specs", {}).get(name, {})}, state)
+            current = retained["sources"][name] if plan["operation"] == "restore" and name not in plan.get("live_overrides", []) else self._capture({**state["sources"][name], **plan.get("source_specs", {}).get(name, {})}, state)
             if {"inspection": current["inspection"], "origin": current["origin"]} != expected:
                 fail("workspace_stale", "Selected source changed after review; no target effects started.", source=name)
         path = self.registry.root / "transactions" / (plan["plan_id"] + ".json")

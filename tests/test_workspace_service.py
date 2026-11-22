@@ -131,3 +131,23 @@ class TestWorkspaceService(WorkspaceFixture):
         self.assertEqual(recovered["status"], "completed", recovered)
         self.assertEqual((self.one / ".agents/skills/alpha").lstat().st_ino, first)
         self.assertTrue(self.service.verify()["valid"])
+
+
+class TestCatalogPlan(WorkspaceFixture):
+    def test_pinned_baseline_and_live_project_override_are_checked_independently(self):
+        from skills_auditor.workspace.common import seal
+        from skills_auditor.workspace.sources import capture
+        release = seal({"schema_version": PREFIX + "release/v1", "sources": {"shared": capture(self.binding)}}, "release_id")
+        project = self.root / "override"
+        self.write_package(project, "exception")
+        self.registry.put("sources", "override", {**self.binding, "root": str(project)})
+        self.write_declaration(self.two, overrides={"alpha": {"source": "override", "entry": "skills/alpha"}})
+        plan = self.service.plan(["two"], catalog_release=release, catalog_digest="a" * 64)
+        self.assertEqual(plan["status"], "planned")
+        self.assertEqual(plan["live_overrides"], ["override"])
+        (project / "helper").write_text("changed")
+        with self.assertRaisesRegex(LifecycleError, "changed after review"):
+            self.apply(plan)
+        self.write_declaration(self.two, baseline=["unpublished"])
+        with self.assertRaisesRegex(LifecycleError, "absent"):
+            self.service.plan(["two"], catalog_release=release)
