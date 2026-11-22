@@ -333,15 +333,17 @@ class Scope:
     def read_context(self, target=None):
         return self._run('read-context', lambda: self._resolve(target, True))
 
-    def read_private(self, name):
+    def read_private(self, name, target=None):
         def operation():
             self._bound()
+            self._target(target)
             return read_file(self.private, name)
         return self._run('read-private', operation)
 
-    def write_private(self, name, data):
+    def write_private(self, name, data, target=None):
         def operation():
             self._bound()
+            self._target(target)
             write_file(self.private, name, data)
             return {'status': 'written', 'sha256': hashlib.sha256(data).hexdigest()}
         return self._run('write-private', operation)
@@ -357,6 +359,12 @@ def main(argv=None):
     parser.add_argument('--target')
     parser.add_argument('--name', help='Relative private file; existing parent directories only.')
     args = parser.parse_args(argv)
+    if args.action == 'init' and (args.target or args.name):
+        parser.error('init does not accept --target or --name')
+    if args.action != 'init' and (args.project_id or args.context):
+        parser.error('--project-id and --context are only accepted by init')
+    if args.action not in ('read-private', 'write-private') and args.name:
+        parser.error('--name is only accepted by private operations')
     try:
         scope = Scope(args.project_root, args.state_dir, args.environment, args.generation, args.workspace, args.skill)
         if args.action == 'init':
@@ -367,9 +375,9 @@ def main(argv=None):
             if not args.name:
                 parser.error('private operations require --name')
             if args.action == 'read-private':
-                sys.stdout.buffer.write(scope.read_private(args.name))
+                sys.stdout.buffer.write(scope.read_private(args.name, args.target))
                 return 0
-            result = scope.write_private(args.name, sys.stdin.buffer.read(LIMIT + 1))
+            result = scope.write_private(args.name, sys.stdin.buffer.read(LIMIT + 1), args.target)
         elif args.action == 'read-context':
             result = scope.read_context(args.target)
         else:

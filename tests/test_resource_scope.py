@@ -263,6 +263,18 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(json.loads(run('read-context')[1])['contexts'][0]['text'], 'context-A')
         self.assertEqual(run('write-private', '--name', 'cli.txt', data=b'cli-state')[0], 0)
         self.assertEqual(run('read-private', '--name', 'cli.txt'), (0, b'cli-state'))
+        self.assertEqual(run('read-private', '--name', 'cli.txt', '--target', str(self.b))[0], 2)
+        self.assertEqual(run('write-private', '--name', 'cli.txt', '--target', str(self.b), data=b'foreign')[0], 2)
+        self.assertEqual(run('read-private', '--name', 'cli.txt', '--target', str(self.a)), (0, b'cli-state'))
+        self.assertEqual(run('write-private', '--name', 'cli.txt', '--target', str(self.a), data=b'valid')[0], 0)
+        nested = self.a / 'nested-private'
+        nested.mkdir()
+        (nested / '.skill-context.json').write_text('{}')
+        self.assertEqual(run('read-private', '--name', 'cli.txt', '--target', str(nested))[0], 2)
+        self.assertEqual(run('write-private', '--name', 'cli.txt', '--target', str(nested), data=b'foreign')[0], 2)
+        self.assertEqual(run('read-private', '--name', 'cli.txt'), (0, b'valid'))
+        with self.assertRaises(SystemExit):
+            run('init', '--project-id', 'project-a', '--context', '.impeccable.md', '--target', str(self.b))
         self.assertEqual(run('read-private', '--name', '../no')[0], 2)
         for action in ('init', 'read-private', 'write-private'):
             with self.assertRaises(SystemExit):
