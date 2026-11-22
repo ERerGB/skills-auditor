@@ -153,3 +153,49 @@ class TestCatalogPlan(WorkspaceFixture):
         self.write_declaration(self.two, baseline=["unpublished"])
         with self.assertRaisesRegex(LifecycleError, "absent"):
             self.service.plan(["two"], **options)
+
+    @patch("skills_auditor.workspace.directory.recheck")
+    def test_unsubscribed_installation_can_activate_a_reviewed_project_source(self, _recheck):
+        from skills_auditor.workspace.common import seal
+        from skills_auditor.workspace.sources import capture
+
+        release = seal({"schema_version": PREFIX + "release/v1", "sources": {"shared": capture(self.binding)}}, "release_id")
+        skill_id = "70ad1646-8528-42e4-b806-a852ba3d3dd5"
+        options = dict(catalog_release=release, catalog_digest="a" * 64, catalog_consent={"workspace": "test"})
+        choice = {"alpha": skill_id}
+
+        def plan():
+            return self.service.plan(["one"], catalog_selected=choice, **options)
+
+        self.write_declaration(self.one, platforms=["codex"])
+        published = plan()
+        published_core = published["targets"][0]["plan"]["children"][0]["plan"]
+        self.assertEqual(self.apply(published)["status"], "completed")
+        choice.clear()
+        self.assertEqual(self.apply(plan())["status"], "completed")
+        target = self.one / ".agents/skills/alpha"
+        self.assertFalse(target.is_symlink())
+
+        draft = self.root / "draft"
+        self.write_package(draft, "first draft")
+        self.registry.put("sources", "draft", {**self.binding, "root": str(draft)})
+        self.write_declaration(self.one, platforms=["codex"], skill_ids={"alpha": skill_id},
+                               overrides={"alpha": {"source": "draft", "entry": "skills/alpha"}})
+        stale = plan()
+        (draft / "helper").write_text("revised draft")
+        with self.assertRaisesRegex(LifecycleError, "changed after review"):
+            self.apply(stale)
+        self.assertFalse(target.is_symlink())
+
+        reviewed = plan()
+        core = reviewed["targets"][0]["plan"]["children"][0]["plan"]
+        self.assertEqual(core["operation"], "enable-from-source")
+        self.assertEqual(core["installation_id"], published_core["installation_id"])
+        self.assertEqual(core["before"]["version_id"], published_core["version"]["version_id"])
+        self.assertEqual(core["version"]["skill_id"], skill_id)
+        self.assertEqual(core["steps"][0]["before"], {"kind": "missing"})
+        self.assertEqual(len(core["steps"]), 1)
+        self.assertEqual(self.apply(reviewed)["status"], "completed")
+        self.assertEqual((target.resolve().parent.parent / "helper").read_text(), "revised draft")
+        self.assertEqual(plan()["summary"]["changes"], 0)
+        self.assertFalse((self.two / ".agents/skills/alpha").is_symlink())

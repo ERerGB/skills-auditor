@@ -27,6 +27,7 @@ TRANSITIONS = {
     "rename": ({"active", "disabled", "archived"}, None, "new"),
     "disable": ({"active"}, "disabled", "preserve"),
     "archive": ({"active", "disabled", "archived"}, "archived", "preserve"),
+    "enable-from-source": ({"disabled"}, "active", "new"),
     "enable": ({"disabled", "archived"}, "active", "new"),
     "uninstall": ({"active", "disabled", "archived"}, "uninstalled", "preserve"),
     "revoke": ({"active", "disabled", "archived"}, None, "revoke"),

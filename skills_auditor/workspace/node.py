@@ -354,10 +354,16 @@ class Node:
                         continue
                     expectations.append(copy.deepcopy(before))
                     if before["state"] != "active":
-                        if not same:
+                        if same:
+                            child = manager.plan("enable", installation_id=before["installation_id"])
+                        elif (before["state"] == "disabled" and packet["origin"]["kind"] == "local"
+                              and declared.get("overrides", {}).get(name) == selected[name]
+                              and (subscription is None or item["source"] in subscription["local_sources"])):
+                            child = manager.plan("enable-from-source", installation_id=before["installation_id"],
+                                                 source=source, entrypoint=item["entry"])
+                        else:
                             findings.append({"code": "workspace_disabled_update", "name": name, "platform": platform})
                             continue
-                        child = manager.plan("enable", installation_id=before["installation_id"])
                     elif same:
                         actions.append({**item, "action": "noop", "installation_id": before["installation_id"]})
                         continue

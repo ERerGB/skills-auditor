@@ -52,6 +52,8 @@ The directory host binds the authenticated reader to its environment. The client
 
 Project-owned local sources remain explicit. A local baseline or override can use a temporary directory while the account subscription is off. An entirely local project can use the ordinary workspace commands offline. Its source bytes and unregistered names stay out of directory reports. For a draft of a registered Skill, record the same UUID under its alias in the project's `skill_ids`. An uploaded observation contains the registered UUID, native state and optional entry-file digest. It never transmits the local path or body. Matching entry bytes establish entry-level evidence. Whole-package integrity comes from release verification.
 
+After applying an unsubscribe, the project's managed installation is disabled. To use a draft, bind its local source and declare the Skill's project override, then plan and apply for that project. A changed draft produces one `enable-from-source` action that keeps the installation identity and publishes the reviewed draft directly. Later edits require another plan and apply. The environment's cloud subscription stays off. An independently installed native entry at the target remains subject to the existing ownership and conflict checks.
+
 The directory retains historical observations separately from subscription changes. An old scan keeps its timestamp after a checkbox changes. A failed native inspection leaves the last successful receipt available. Codex is the supported observation reporter in this iteration.
 
 ## Publishing immutable v1 releases
